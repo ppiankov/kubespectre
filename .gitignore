@@ -1,0 +1,14 @@
+bin/
+dist/
+coverage.out
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.prof
+.DS_Store
+
+# Generated files
+.kubespectre.yaml
+kubespectre-rbac.yaml
