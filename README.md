@@ -32,11 +32,22 @@ kubespectre audits Kubernetes cluster security: RBAC permissions, pod security s
 | Image Provenance | No image digest pinning, untrusted registries | medium |
 | Audit Logging | Audit policy missing or incomplete | high |
 
+## Install
+
+```bash
+# Homebrew
+brew install ppiankov/tap/kubespectre
+
+# Go
+go install github.com/ppiankov/kubespectre/cmd/kubespectre@latest
+
+# Binary: download from GitHub Releases
+# https://github.com/ppiankov/kubespectre/releases
+```
+
 ## Quick Start
 
 ```bash
-# Install
-go install github.com/ppiankov/kubespectre/cmd/kubespectre@latest
 
 # Generate config and RBAC policy
 kubespectre init
@@ -105,7 +116,7 @@ trusted_registries:
 
 ## Project Status
 
-**Status: Alpha** | Pre-release
+**Status: Alpha** | v0.1.0
 
 ## License
 
