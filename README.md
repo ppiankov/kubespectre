@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/ppiankov/kubespectre/actions/workflows/ci.yml/badge.svg)](https://github.com/ppiankov/kubespectre/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ppiankov/kubespectre)](https://goreportcard.com/report/github.com/ppiankov/kubespectre)
+[![ANCC](https://img.shields.io/badge/ANCC-compliant-brightgreen)](https://ancc.dev)
 
 **kubespectre** — Kubernetes security posture auditor. Part of [SpectreHub](https://github.com/ppiankov/spectrehub).
 
@@ -62,10 +63,16 @@ spectrehub collect --tool kubespectre
 
 kubespectre operates in **read-only mode**. It inspects and reports — never modifies, deletes, or alters your cluster resources.
 
+## Documentation
+
+| Document | Contents |
+|----------|----------|
+| [CLI Reference](docs/cli-reference.md) | Full command reference, flags, and configuration |
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
 ---
 
-Built by [Obsta Labs](https://github.com/ppiankov)
+Built by [Obsta Labs](https://obstalabs.dev)
