@@ -1,6 +1,11 @@
 package k8s
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestSeverityRank(t *testing.T) {
 	tests := []struct {
@@ -60,6 +65,83 @@ func TestParseSeverity(t *testing.T) {
 		got := ParseSeverity(tt.input)
 		if got != tt.want {
 			t.Errorf("ParseSeverity(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// WO-6: Lock the three ratified positive observation constructors.
+func TestClusterPositiveEdgeConstructors(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 1, 2, 3, 0, time.UTC)
+	edges := []ClusterPositiveEdge{
+		NewServiceAccountRoleAnnotationObservedEdge(
+			"prod", "payments", "checkout", "arn:aws:iam::123456789012:role/checkout", observedAt,
+		),
+		NewWorkloadReferenceObservedEdge(
+			"prod", "payments", "checkout", "Deployment", "checkout", observedAt,
+		),
+		NewPodReferenceObservedEdge("prod", "payments", "checkout", "checkout-abc", observedAt),
+	}
+	wantTypes := []ClusterPositiveEdgeType{
+		ServiceAccountRoleAnnotationObserved,
+		WorkloadReferenceObserved,
+		PodReferenceObserved,
+	}
+
+	for i, edge := range edges {
+		if edge == nil {
+			t.Fatalf("edge %d is nil", i)
+		}
+		if edge.Type() != wantTypes[i] {
+			t.Errorf("edge %d type = %q, want %q", i, edge.Type(), wantTypes[i])
+		}
+		if !edge.ObservedAt().Equal(observedAt) {
+			t.Errorf("edge %d observed at = %s, want %s", i, edge.ObservedAt(), observedAt)
+		}
+	}
+}
+
+// WO-6: Prove incomplete evidence cannot construct an edge.
+func TestClusterPositiveEdgeConstructorsRejectIncompleteEvidence(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 1, 2, 3, 0, time.UTC)
+	tests := []struct {
+		name string
+		edge ClusterPositiveEdge
+	}{
+		{"annotation without role", NewServiceAccountRoleAnnotationObservedEdge("prod", "ns", "sa", "", observedAt)},
+		{"annotation without instant", NewServiceAccountRoleAnnotationObservedEdge("prod", "ns", "sa", "role", time.Time{})},
+		{"workload without kind", NewWorkloadReferenceObservedEdge("prod", "ns", "sa", "", "name", observedAt)},
+		{"workload without name", NewWorkloadReferenceObservedEdge("prod", "ns", "sa", "Deployment", "", observedAt)},
+		{"pod without name", NewPodReferenceObservedEdge("prod", "ns", "sa", "", observedAt)},
+		{"pod without service account", NewPodReferenceObservedEdge("prod", "ns", "", "pod", observedAt)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.edge != nil {
+				t.Fatalf("edge = %#v, want nil", tt.edge)
+			}
+		})
+	}
+}
+
+// WO-6: Prove edge JSON excludes raw identity and absence vocabulary.
+func TestClusterPositiveEdgesDoNotSerializeIdentityOrAbsence(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 1, 2, 3, 0, time.UTC)
+	edge := NewServiceAccountRoleAnnotationObservedEdge(
+		"prod", "secret-namespace", "secret-service-account", "secret-role-arn", observedAt,
+	)
+
+	encoded, err := json.Marshal(edge)
+	if err != nil {
+		t.Fatalf("marshal edge: %v", err)
+	}
+	got := string(encoded)
+	for _, forbidden := range []string{
+		"secret-namespace", "secret-service-account", "secret-role-arn",
+		"negative", "absence", "orphan", "removable", "no_match",
+	} {
+		if strings.Contains(strings.ToLower(got), forbidden) {
+			t.Errorf("serialized edge %s contains forbidden value %q", got, forbidden)
 		}
 	}
 }

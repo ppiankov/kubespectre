@@ -6,11 +6,12 @@ import (
 	"testing"
 )
 
+// WO-15: Prove the SpectreHub artifact carries positive cluster evidence end to end.
 func TestSpectreHubReporter(t *testing.T) {
 	var buf bytes.Buffer
 	r := &SpectreHubReporter{Writer: &buf}
 
-	if err := r.Generate(testData()); err != nil {
+	if err := r.Generate(testDataWithClusterEvidence()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -33,6 +34,7 @@ func TestSpectreHubReporter(t *testing.T) {
 	if !ok || len(findings) != 2 {
 		t.Errorf("findings count = %d, want 2", len(findings))
 	}
+	assertClusterEvidenceEnvelope(t, envelope)
 }
 
 func TestSpectreHubSchemaField(t *testing.T) {

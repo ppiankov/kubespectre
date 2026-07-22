@@ -16,6 +16,15 @@ type Auditor interface {
 	Name() string
 }
 
+// WO-6: evidenceAuditor keeps the positive evidence plane opt-in for compatible auditors.
+type evidenceAuditor interface {
+	auditWithEvidence(
+		ctx context.Context,
+		client kubernetes.Interface,
+		cfg AuditConfig,
+	) (*serviceAccountEvidenceResult, error)
+}
+
 // MultiAuditor orchestrates running multiple auditors in parallel.
 type MultiAuditor struct {
 	client      kubernetes.Interface
@@ -36,6 +45,7 @@ func NewMultiAuditor(client kubernetes.Interface, auditors []Auditor, concurrenc
 }
 
 // AuditAll runs all auditors and returns combined results.
+// WO-6: Merge positive evidence and proven coverage without changing auditor concurrency.
 func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResult, error) {
 	var (
 		mu       sync.Mutex
@@ -50,17 +60,46 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 		g.Go(func() error {
 			slog.Debug("Running auditor", "name", a.Name())
 
-			findings, err := a.Audit(ctx, m.client, cfg)
-			if err != nil {
-				mu.Lock()
-				combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %v", a.Name(), err))
-				mu.Unlock()
-				slog.Warn("Auditor failed", "name", a.Name(), "error", err)
-				return nil
+			var (
+				findings      []Finding
+				positiveEdges []ClusterPositiveEdge
+				coverage      []NamespaceCoverage
+				auditErrors   []string
+			)
+			if evidenceSource, ok := a.(evidenceAuditor); ok {
+				// WO-6: merge only evidence returned by the sealed ServiceAccount collection path.
+				result, err := evidenceSource.auditWithEvidence(ctx, m.client, cfg)
+				if err != nil {
+					mu.Lock()
+					combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %v", a.Name(), err))
+					mu.Unlock()
+					slog.Warn("Auditor failed", "name", a.Name(), "error", err)
+					return nil
+				}
+				findings = result.Findings
+				positiveEdges = result.ClusterPositiveEdges
+				coverage = result.Coverage
+				auditErrors = result.Errors
+			} else {
+				var err error
+				findings, err = a.Audit(ctx, m.client, cfg)
+				if err != nil {
+					mu.Lock()
+					combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %v", a.Name(), err))
+					mu.Unlock()
+					slog.Warn("Auditor failed", "name", a.Name(), "error", err)
+					return nil
+				}
 			}
 
 			mu.Lock()
 			combined.Findings = append(combined.Findings, findings...)
+			// WO-6: merge positive evidence, proven scope, and collection errors atomically.
+			combined.ClusterPositiveEdges = append(combined.ClusterPositiveEdges, positiveEdges...)
+			combined.NamespaceCoverage = append(combined.NamespaceCoverage, coverage...)
+			for _, auditErr := range auditErrors {
+				combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %s", a.Name(), auditErr))
+			}
 			mu.Unlock()
 			return nil
 		})
