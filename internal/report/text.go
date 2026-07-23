@@ -6,9 +6,12 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/ppiankov/kubespectre/internal/k8s"
 )
 
 // Generate writes human-readable terminal output.
+// WO-16: Render a stable severity-first copy without mutating shared report data.
 func (r *TextReporter) Generate(data Data) error {
 	tw := tabwriter.NewWriter(r.Writer, 0, 4, 2, ' ', 0)
 	w := &errWriter{w: r.Writer}
@@ -30,7 +33,11 @@ func (r *TextReporter) Generate(data Data) error {
 	tw2.printf("SEVERITY\tTYPE\tRESOURCE\tNAMESPACE\tFINDING\tMESSAGE\n")
 	tw2.printf("--------\t----\t--------\t---------\t-------\t-------\n")
 
-	for _, f := range data.Findings {
+	findings := append([]k8s.Finding(nil), data.Findings...)
+	sort.SliceStable(findings, func(i, j int) bool {
+		return k8s.SeverityRank(findings[i].Severity) > k8s.SeverityRank(findings[j].Severity)
+	})
+	for _, f := range findings {
 		ns := f.Namespace
 		if ns == "" {
 			ns = "(cluster)"

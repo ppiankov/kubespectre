@@ -28,6 +28,10 @@ func (s *ImageScanner) Audit(ctx context.Context, client kubernetes.Interface, c
 	seen := make(map[string]bool)
 
 	for _, pod := range pods.Items {
+		// WO-21: Enforce the operator boundary before producing image findings.
+		if cfg.Exclusions.Matches(pod.Namespace, pod.Labels) {
+			continue
+		}
 		allContainers := append(pod.Spec.Containers, pod.Spec.InitContainers...)
 		for _, c := range allContainers {
 			image := c.Image

@@ -139,3 +139,25 @@ func TestRBACScanner_SystemSubjectInKubeNamespace(t *testing.T) {
 		t.Errorf("got %d findings, want 0 (kube-system SA should be skipped)", len(findings))
 	}
 }
+
+// WO-23: Exclude labeled RBAC resources while retaining neighboring findings.
+func TestRBACScanner_Exclusions(t *testing.T) {
+	exclusions, err := NewExclusions(nil, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "skip-binding", Labels: map[string]string{"scan": "skip"}}, RoleRef: rbacv1.RoleRef{Name: "cluster-admin"}, Subjects: []rbacv1.Subject{{Kind: "User", Name: "alice"}}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "keep-binding"}, RoleRef: rbacv1.RoleRef{Name: "cluster-admin"}, Subjects: []rbacv1.Subject{{Kind: "User", Name: "bob"}}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "skip-role", Labels: map[string]string{"scan": "skip"}}, Rules: []rbacv1.PolicyRule{{Verbs: []string{"*"}, Resources: []string{"pods"}}}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "keep-role"}, Rules: []rbacv1.PolicyRule{{Verbs: []string{"*"}, Resources: []string{"pods"}}}},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test", Exclusions: exclusions})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 2 || findings[0].ResourceID != "keep-binding" || findings[1].ResourceID != "keep-role" {
+		t.Fatalf("findings = %#v, want neighboring binding and role", findings)
+	}
+}

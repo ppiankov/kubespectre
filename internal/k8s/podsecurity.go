@@ -32,6 +32,10 @@ func (s *PodSecurityScanner) Audit(ctx context.Context, client kubernetes.Interf
 	}
 
 	for _, pod := range pods.Items {
+		// WO-21: Enforce the operator boundary before producing pod findings.
+		if cfg.Exclusions.Matches(pod.Namespace, pod.Labels) {
+			continue
+		}
 		if pod.Spec.HostNetwork {
 			findings = append(findings, Finding{
 				ID:           FindingHostNetwork,

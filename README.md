@@ -38,6 +38,16 @@ cd kubespectre
 make build
 ```
 
+### Windows
+
+Download the `kubespectre_<version>_windows_<arch>.zip` archive from
+[GitHub Releases](https://github.com/ppiankov/kubespectre/releases), extract it,
+then run:
+
+```powershell
+.\kubespectre.exe version
+```
+
 ### Usage
 
 ```sh

@@ -101,6 +101,7 @@ type AuditConfig struct {
 	SeverityMin       Severity
 	TrustedRegistries []string
 	Cluster           string
+	Exclusions        Exclusions // WO-19: immutable operator-declared scan boundary.
 }
 
 // WO-6: ClusterPositiveEdgeType is closed to the three ratified positive observations.

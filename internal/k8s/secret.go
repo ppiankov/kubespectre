@@ -42,6 +42,10 @@ func (s *SecretScanner) Audit(ctx context.Context, client kubernetes.Interface, 
 	staleThreshold := time.Now().AddDate(0, 0, -staleDays)
 
 	for _, secret := range secrets.Items {
+		// WO-21: Enforce the operator boundary before producing secret findings.
+		if cfg.Exclusions.Matches(secret.Namespace, secret.Labels) {
+			continue
+		}
 		// Skip service account tokens and helm secrets
 		if secret.Type == corev1.SecretTypeServiceAccountToken {
 			continue

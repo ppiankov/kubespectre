@@ -220,3 +220,27 @@ func TestIsTrustedRegistry(t *testing.T) {
 		}
 	}
 }
+
+// WO-21: Exclude matching pod images while retaining neighboring image findings.
+func TestImageScanner_Exclusions(t *testing.T) {
+	exclusions, err := NewExclusions([]string{"excluded"}, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	client := fake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "namespace-skip", Namespace: "excluded"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}}}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "label-skip", Namespace: "default", Labels: map[string]string{"scan": "skip"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}}}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "keep", Namespace: "default"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}}}},
+	)
+
+	findings, err := (&ImageScanner{}).Audit(context.Background(), client, AuditConfig{
+		Cluster:    "test",
+		Exclusions: exclusions,
+	})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].ResourceID != "keep" {
+		t.Fatalf("findings = %#v, want only neighboring pod image", findings)
+	}
+}

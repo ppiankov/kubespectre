@@ -94,20 +94,25 @@ func TestLoadInvalidYAML(t *testing.T) {
 	}
 }
 
+// WO-18: Pin valid, empty, and malformed configured audit deadlines.
 func TestTimeoutDuration(t *testing.T) {
 	tests := []struct {
 		timeout string
 		want    time.Duration
+		wantErr bool
 	}{
-		{"5m", 5 * time.Minute},
-		{"30s", 30 * time.Second},
-		{"", 0},
-		{"invalid", 0},
+		{"5m", 5 * time.Minute, false},
+		{"30s", 30 * time.Second, false},
+		{"", 0, false},
+		{"invalid", 0, true},
 	}
 
 	for _, tt := range tests {
 		cfg := Config{Timeout: tt.timeout}
-		got := cfg.TimeoutDuration()
+		got, err := cfg.TimeoutDuration()
+		if (err != nil) != tt.wantErr {
+			t.Errorf("TimeoutDuration(%q) error = %v, wantErr %t", tt.timeout, err, tt.wantErr)
+		}
 		if got != tt.want {
 			t.Errorf("TimeoutDuration(%q) = %v, want %v", tt.timeout, got, tt.want)
 		}

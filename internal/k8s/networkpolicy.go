@@ -30,6 +30,10 @@ func (s *NetworkPolicyScanner) Audit(ctx context.Context, client kubernetes.Inte
 	}
 
 	for _, ns := range namespaces.Items {
+		// WO-23: Enforce configured namespace and label boundaries before policy checks.
+		if cfg.Exclusions.Matches(ns.Name, ns.Labels) {
+			continue
+		}
 		if skipNamespaces[ns.Name] {
 			continue
 		}

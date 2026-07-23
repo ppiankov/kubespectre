@@ -11,6 +11,16 @@ go install github.com/ppiankov/kubespectre/cmd/kubespectre@latest
 # https://github.com/ppiankov/kubespectre/releases
 ```
 
+### Windows
+
+Download `kubespectre_<version>_windows_<arch>.zip` from
+[GitHub Releases](https://github.com/ppiankov/kubespectre/releases), extract it,
+and verify the executable in PowerShell:
+
+```powershell
+.\kubespectre.exe version
+```
+
 
 ## Usage
 
@@ -49,7 +59,16 @@ timeout: 5m
 trusted_registries:
   - gcr.io/my-project
   - us-docker.pkg.dev/my-project
+exclude:
+  namespaces:
+    - kube-system
+  labels:
+    - app=legacy
+    - tier in (internal,batch)
 ```
+
+Namespace exclusions are exact names. Label exclusions use Kubernetes selector
+syntax, and a resource is excluded when any configured selector matches.
 
 ### JSON output
 
@@ -70,4 +89,3 @@ With `--format json`, the audit envelope may include two additional fields:
 ## Project Status
 
 **Status: Alpha** | v0.2.0
-

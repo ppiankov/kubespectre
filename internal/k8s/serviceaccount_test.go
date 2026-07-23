@@ -439,6 +439,48 @@ func TestServiceAccountScannerCollectsAllWorkloadKindsInStableOrder(t *testing.T
 	}
 }
 
+// WO-22: Enforce exclusions across findings, coverage, and every positive edge source.
+func TestServiceAccountScannerAppliesExclusionsToEvidence(t *testing.T) {
+	exclusions, err := NewExclusions([]string{"excluded"}, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "excluded"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kept"}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "skip-sa", Namespace: "kept", Labels: map[string]string{"scan": "skip"}, Annotations: map[string]string{serviceAccountRoleARNAnnotation: "skip-role"}}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "keep-sa", Namespace: "kept", Annotations: map[string]string{serviceAccountRoleARNAnnotation: "keep-role"}}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "skip-workload", Namespace: "kept", Labels: map[string]string{"scan": "skip"}}, Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{ServiceAccountName: "skip-sa"}}}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "keep-workload", Namespace: "kept"}, Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{}, Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{ServiceAccountName: "keep-sa"}}}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "namespace-skip", Namespace: "excluded"}, Spec: corev1.PodSpec{ServiceAccountName: "default", AutomountServiceAccountToken: boolPtr(false)}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "label-skip", Namespace: "kept", Labels: map[string]string{"scan": "skip"}}, Spec: corev1.PodSpec{ServiceAccountName: "default", AutomountServiceAccountToken: boolPtr(false)}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "keep-pod", Namespace: "kept"}, Spec: corev1.PodSpec{ServiceAccountName: "keep-sa", AutomountServiceAccountToken: boolPtr(false)}},
+	)
+	allowServiceAccountList(client, true)
+
+	result, err := (&ServiceAccountScanner{}).auditWithEvidence(context.Background(), client, AuditConfig{
+		Cluster:    "prod",
+		Exclusions: exclusions,
+	})
+	if err != nil {
+		t.Fatalf("auditWithEvidence() error = %v", err)
+	}
+	if len(result.Findings) != 0 {
+		t.Fatalf("findings = %#v, want excluded violating pods suppressed", result.Findings)
+	}
+	if len(result.Coverage) != 1 || result.Coverage[0].Namespace != "kept" {
+		t.Fatalf("coverage = %#v, want only kept namespace", result.Coverage)
+	}
+	if len(result.ClusterPositiveEdges) != 3 {
+		t.Fatalf("edges = %#v, want kept annotation, workload, and pod", result.ClusterPositiveEdges)
+	}
+	for _, edge := range result.ClusterPositiveEdges {
+		if edge.Namespace() != "kept" || strings.Contains(edge.ServiceAccount(), "skip") {
+			t.Fatalf("excluded identity survived: %#v", edge)
+		}
+	}
+}
+
 // WO-6: Model definitive SSAR permission without weakening production checks.
 func allowServiceAccountList(client *fake.Clientset, allowed bool) {
 	client.PrependReactor("create", "selfsubjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {

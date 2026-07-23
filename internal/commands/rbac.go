@@ -14,10 +14,8 @@ permissions and cluster-admin bindings to non-system service accounts.`,
 }
 
 func init() {
-	rbacCmd.Flags().StringVar(&auditFlags.format, "format", "text", "Output format: text, json, sarif, spectrehub")
-	rbacCmd.Flags().StringVarP(&auditFlags.outputFile, "output", "o", "", "Output file path (default: stdout)")
-	rbacCmd.Flags().StringVar(&auditFlags.severityMin, "severity-min", "low", "Minimum severity: critical, high, medium, low")
-	rbacCmd.Flags().DurationVar(&auditFlags.timeout, "timeout", auditFlags.timeout, "Audit timeout")
+	// WO-18: Keep the RBAC command on the same audited flag-registration path.
+	addAuditFlags(rbacCmd, false)
 
 	rootCmd.AddCommand(rbacCmd)
 }
