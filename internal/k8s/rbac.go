@@ -25,6 +25,10 @@ func (s *RBACScanner) Audit(ctx context.Context, client kubernetes.Interface, cf
 	}
 
 	for _, crb := range bindings.Items {
+		// WO-23: Enforce label exclusions before producing binding findings.
+		if cfg.Exclusions.Matches("", crb.Labels) {
+			continue
+		}
 		if crb.RoleRef.Name == "cluster-admin" {
 			for _, subject := range crb.Subjects {
 				if isSystemSubject(subject.Name, subject.Namespace) {
@@ -49,6 +53,10 @@ func (s *RBACScanner) Audit(ctx context.Context, client kubernetes.Interface, cf
 	}
 
 	for _, role := range roles.Items {
+		// WO-23: Enforce label exclusions before producing role findings.
+		if cfg.Exclusions.Matches("", role.Labels) {
+			continue
+		}
 		if isSystemRole(role.Name) {
 			continue
 		}

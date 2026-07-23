@@ -232,3 +232,29 @@ func TestSecretScanner_DefaultStaleDays(t *testing.T) {
 		t.Errorf("got %d findings, want 0 (80 days < 90 default)", len(findings))
 	}
 }
+
+// WO-21: Exclude matching secrets without suppressing neighboring unused-secret findings.
+func TestSecretScanner_Exclusions(t *testing.T) {
+	exclusions, err := NewExclusions([]string{"excluded"}, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	recent := metav1.NewTime(time.Now())
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "namespace-skip", Namespace: "excluded", CreationTimestamp: recent}, Type: corev1.SecretTypeOpaque},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "label-skip", Namespace: "default", Labels: map[string]string{"scan": "skip"}, CreationTimestamp: recent}, Type: corev1.SecretTypeOpaque},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "keep", Namespace: "default", CreationTimestamp: recent}, Type: corev1.SecretTypeOpaque},
+	)
+
+	findings, err := (&SecretScanner{}).Audit(context.Background(), client, AuditConfig{
+		Cluster:    "test",
+		StaleDays:  90,
+		Exclusions: exclusions,
+	})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].ResourceID != "keep" {
+		t.Fatalf("findings = %#v, want only neighboring secret", findings)
+	}
+}

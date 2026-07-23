@@ -109,3 +109,24 @@ func TestNetworkPolicyScanner_Mixed(t *testing.T) {
 		t.Errorf("resource ID = %q, want %q", findings[0].ResourceID, "unsecured")
 	}
 }
+
+// WO-23: Exclude namespaces by exact name or labels without hiding neighbors.
+func TestNetworkPolicyScanner_Exclusions(t *testing.T) {
+	exclusions, err := NewExclusions([]string{"namespace-skip"}, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "namespace-skip"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "label-skip", Labels: map[string]string{"scan": "skip"}}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "keep"}},
+	)
+
+	findings, err := (&NetworkPolicyScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test", Exclusions: exclusions})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].ResourceID != "keep" {
+		t.Fatalf("findings = %#v, want only neighboring namespace", findings)
+	}
+}

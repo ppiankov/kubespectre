@@ -89,6 +89,10 @@ trusted_registries:
 #   namespaces:
 #     - kube-system
 #     - kube-public
+#   # Kubernetes label selectors; any matching selector excludes the resource
+#   labels:
+#     - app=legacy
+#     - tier in (internal,batch)
 `
 
 const sampleRBAC = `# kubespectre ClusterRole and ClusterRoleBinding

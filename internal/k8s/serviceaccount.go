@@ -54,7 +54,7 @@ func (s *ServiceAccountScanner) auditWithEvidence(
 	}
 
 	result := &serviceAccountEvidenceResult{Findings: serviceAccountFindings(pods, cfg)}
-	namespaces, discoveryErrors := namespacesForEvidence(ctx, client, cfg.Namespace, pods)
+	namespaces, discoveryErrors := namespacesForEvidence(ctx, client, cfg.Namespace, pods, cfg.Exclusions)
 	result.Errors = append(result.Errors, discoveryErrors...)
 
 	var annotationEdges, workloadEdges, podEdges []ClusterPositiveEdge
@@ -82,13 +82,26 @@ func (s *ServiceAccountScanner) auditWithEvidence(
 			serviceAccounts.Items,
 			cfg.Cluster,
 			coverage.ObservedAt,
+			cfg.Exclusions,
 		)...)
 
-		observedWorkloads, workloadErrors := s.collectWorkloadReferenceEdges(ctx, client, cfg.Cluster, namespace)
+		observedWorkloads, workloadErrors := s.collectWorkloadReferenceEdges(
+			ctx,
+			client,
+			cfg.Cluster,
+			namespace,
+			cfg.Exclusions,
+		)
 		workloadEdges = append(workloadEdges, observedWorkloads...)
 		result.Errors = append(result.Errors, workloadErrors...)
 
-		podEdges = append(podEdges, podReferenceEdges(pods, cfg.Cluster, namespace, podsObservedAt)...)
+		podEdges = append(podEdges, podReferenceEdges(
+			pods,
+			cfg.Cluster,
+			namespace,
+			podsObservedAt,
+			cfg.Exclusions,
+		)...)
 		result.Coverage = append(result.Coverage, coverage)
 	}
 
@@ -133,6 +146,10 @@ func serviceAccountFindings(pods []corev1.Pod, cfg AuditConfig) []Finding {
 	var findings []Finding
 
 	for _, pod := range pods {
+		// WO-22: Enforce exclusions before producing ServiceAccount posture findings.
+		if cfg.Exclusions.Matches(pod.Namespace, pod.Labels) {
+			continue
+		}
 		saName := resolvedServiceAccountName(pod.Spec.ServiceAccountName)
 
 		if saName == "default" {
@@ -169,8 +186,13 @@ func namespacesForEvidence(
 	client kubernetes.Interface,
 	configuredNamespace string,
 	pods []corev1.Pod,
+	exclusions Exclusions,
 ) ([]string, []string) {
 	if configuredNamespace != "" {
+		// WO-22: An excluded namespace has no evidence coverage entry.
+		if exclusions.Matches(configuredNamespace, nil) {
+			return nil, nil
+		}
 		return []string{configuredNamespace}, nil
 	}
 
@@ -178,14 +200,14 @@ func namespacesForEvidence(
 	namespaces, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err == nil {
 		for _, namespace := range namespaces.Items {
-			if namespace.Name != "" {
+			if namespace.Name != "" && !exclusions.Matches(namespace.Name, namespace.Labels) {
 				set[namespace.Name] = struct{}{}
 			}
 		}
 	} else {
 		// WO-6: pod namespaces are candidates only; each still requires a definitive SSAR.
 		for _, pod := range pods {
-			if pod.Namespace != "" {
+			if pod.Namespace != "" && !exclusions.Matches(pod.Namespace, nil) {
 				set[pod.Namespace] = struct{}{}
 			}
 		}
@@ -207,9 +229,14 @@ func serviceAccountAnnotationEdges(
 	serviceAccounts []corev1.ServiceAccount,
 	cluster string,
 	observedAt time.Time,
+	exclusions Exclusions,
 ) []ClusterPositiveEdge {
 	edges := make([]ClusterPositiveEdge, 0, len(serviceAccounts))
 	for _, serviceAccount := range serviceAccounts {
+		// WO-22: Excluded ServiceAccounts cannot become correlation evidence.
+		if exclusions.Matches(serviceAccount.Namespace, serviceAccount.Labels) {
+			continue
+		}
 		roleARN := strings.TrimSpace(serviceAccount.Annotations[serviceAccountRoleARNAnnotation])
 		if roleARN == "" {
 			continue
@@ -233,6 +260,7 @@ func (s *ServiceAccountScanner) collectWorkloadReferenceEdges(
 	ctx context.Context,
 	client kubernetes.Interface,
 	cluster, namespace string,
+	exclusions Exclusions,
 ) ([]ClusterPositiveEdge, []string) {
 	var edges []ClusterPositiveEdge
 	var collectionErrors []string
@@ -243,6 +271,9 @@ func (s *ServiceAccountScanner) collectWorkloadReferenceEdges(
 		collectionErrors = append(collectionErrors, fmt.Sprintf("list deployments in namespace %q: %v", namespace, err))
 	} else {
 		for _, workload := range deployments.Items {
+			if exclusions.Matches(namespace, workload.Labels) {
+				continue
+			}
 			edges = appendWorkloadReferenceEdge(edges, cluster, namespace, "Deployment", workload.Name, workload.Spec.Template.Spec, observedAt)
 		}
 	}
@@ -253,6 +284,9 @@ func (s *ServiceAccountScanner) collectWorkloadReferenceEdges(
 		collectionErrors = append(collectionErrors, fmt.Sprintf("list statefulsets in namespace %q: %v", namespace, err))
 	} else {
 		for _, workload := range statefulSets.Items {
+			if exclusions.Matches(namespace, workload.Labels) {
+				continue
+			}
 			edges = appendWorkloadReferenceEdge(edges, cluster, namespace, "StatefulSet", workload.Name, workload.Spec.Template.Spec, observedAt)
 		}
 	}
@@ -263,6 +297,9 @@ func (s *ServiceAccountScanner) collectWorkloadReferenceEdges(
 		collectionErrors = append(collectionErrors, fmt.Sprintf("list daemonsets in namespace %q: %v", namespace, err))
 	} else {
 		for _, workload := range daemonSets.Items {
+			if exclusions.Matches(namespace, workload.Labels) {
+				continue
+			}
 			edges = appendWorkloadReferenceEdge(edges, cluster, namespace, "DaemonSet", workload.Name, workload.Spec.Template.Spec, observedAt)
 		}
 	}
@@ -273,6 +310,9 @@ func (s *ServiceAccountScanner) collectWorkloadReferenceEdges(
 		collectionErrors = append(collectionErrors, fmt.Sprintf("list jobs in namespace %q: %v", namespace, err))
 	} else {
 		for _, workload := range jobs.Items {
+			if exclusions.Matches(namespace, workload.Labels) {
+				continue
+			}
 			edges = appendWorkloadReferenceEdge(edges, cluster, namespace, "Job", workload.Name, workload.Spec.Template.Spec, observedAt)
 		}
 	}
@@ -283,6 +323,9 @@ func (s *ServiceAccountScanner) collectWorkloadReferenceEdges(
 		collectionErrors = append(collectionErrors, fmt.Sprintf("list cronjobs in namespace %q: %v", namespace, err))
 	} else {
 		for _, workload := range cronJobs.Items {
+			if exclusions.Matches(namespace, workload.Labels) {
+				continue
+			}
 			edges = appendWorkloadReferenceEdge(
 				edges,
 				cluster,
@@ -324,10 +367,12 @@ func podReferenceEdges(
 	pods []corev1.Pod,
 	cluster, namespace string,
 	observedAt time.Time,
+	exclusions Exclusions,
 ) []ClusterPositiveEdge {
 	var edges []ClusterPositiveEdge
 	for _, pod := range pods {
-		if pod.Namespace != namespace {
+		// WO-22: Excluded pods cannot become correlation evidence.
+		if pod.Namespace != namespace || exclusions.Matches(pod.Namespace, pod.Labels) {
 			continue
 		}
 		edge := NewPodReferenceObservedEdge(

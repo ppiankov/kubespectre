@@ -10,6 +10,15 @@ import (
 	"github.com/ppiankov/kubespectre/internal/k8s"
 	"github.com/ppiankov/kubespectre/internal/report"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+)
+
+// WO-18: Name shared audit defaults so registration and precedence cannot drift.
+const (
+	defaultAuditFormat  = "text"
+	defaultSeverityMin  = "low"
+	defaultStaleDays    = 90
+	defaultAuditTimeout = 5 * time.Minute
 )
 
 var auditFlags struct {
@@ -31,14 +40,22 @@ Requires a valid kubeconfig with read access to cluster resources.`,
 	RunE: runAudit,
 }
 
+// WO-18: Install one shared audit flag surface before registering the command.
 func init() {
-	auditCmd.Flags().StringVar(&auditFlags.format, "format", "text", "Output format: text, json, sarif, spectrehub")
-	auditCmd.Flags().StringVarP(&auditFlags.outputFile, "output", "o", "", "Output file path (default: stdout)")
-	auditCmd.Flags().StringVar(&auditFlags.severityMin, "severity-min", "low", "Minimum severity: critical, high, medium, low")
-	auditCmd.Flags().IntVar(&auditFlags.staleDays, "stale-days", 90, "Threshold for stale secrets (days)")
-	auditCmd.Flags().DurationVar(&auditFlags.timeout, "timeout", 5*time.Minute, "Audit timeout")
+	addAuditFlags(auditCmd, true)
 
 	rootCmd.AddCommand(auditCmd)
+}
+
+// WO-18: Register the shared audit surface once for audit and RBAC commands.
+func addAuditFlags(cmd *cobra.Command, includeStaleDays bool) {
+	cmd.Flags().StringVar(&auditFlags.format, "format", defaultAuditFormat, "Output format: text, json, sarif, spectrehub")
+	cmd.Flags().StringVarP(&auditFlags.outputFile, "output", "o", "", "Output file path (default: stdout)")
+	cmd.Flags().StringVar(&auditFlags.severityMin, "severity-min", defaultSeverityMin, "Minimum severity: critical, high, medium, low")
+	cmd.Flags().DurationVar(&auditFlags.timeout, "timeout", defaultAuditTimeout, "Audit timeout")
+	if includeStaleDays {
+		cmd.Flags().IntVar(&auditFlags.staleDays, "stale-days", defaultStaleDays, "Threshold for stale secrets (days)")
+	}
 }
 
 func runAudit(cmd *cobra.Command, _ []string) error {
@@ -46,15 +63,22 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 }
 
 // WO-15: Preserve positive cluster evidence through user-facing report envelopes.
+// WO-18: Resolve configuration before constructing the command deadline.
 func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
+	if err := applyConfigDefaults(cmd); err != nil {
+		return err
+	}
+	exclusions, err := configuredExclusions()
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	if auditFlags.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, auditFlags.timeout)
 		defer cancel()
 	}
-
-	applyConfigDefaults()
 
 	client, err := k8s.BuildClient(k8s.KubeOpts{
 		Kubeconfig: kubeconfig,
@@ -64,10 +88,7 @@ func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 		return enhanceError("connect to cluster", err)
 	}
 
-	ns := namespace
-	if ns == "" && cfg.Namespace != "" {
-		ns = cfg.Namespace
-	}
+	ns := effectiveNamespace(cmd)
 
 	severityMin := k8s.ParseSeverity(auditFlags.severityMin)
 
@@ -77,6 +98,7 @@ func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 		SeverityMin:       severityMin,
 		TrustedRegistries: cfg.TrustedRegistries,
 		Cluster:           resolveClusterName(),
+		Exclusions:        exclusions, // WO-20: carry the validated operator scan boundary.
 	}
 
 	slog.Info("Starting audit", "namespace", ns, "severity-min", auditFlags.severityMin)
@@ -134,14 +156,60 @@ func resolveClusterName() string {
 	return "current-context"
 }
 
-func applyConfigDefaults() {
-	if auditFlags.format == "text" && cfg.Format != "" {
+// WO-18: Apply configuration only where Cobra proves the operator omitted a flag.
+func applyConfigDefaults(cmd *cobra.Command) error {
+	if !commandFlagChanged(cmd, "format") && cfg.Format != "" {
 		auditFlags.format = cfg.Format
 	}
-	if auditFlags.staleDays == 90 && cfg.StaleDays > 0 {
+	if commandHasFlag(cmd, "stale-days") && !commandFlagChanged(cmd, "stale-days") && cfg.StaleDays > 0 {
 		auditFlags.staleDays = cfg.StaleDays
 	}
-	if auditFlags.severityMin == "low" && cfg.SeverityMin != "" {
+	if !commandFlagChanged(cmd, "severity-min") && cfg.SeverityMin != "" {
 		auditFlags.severityMin = cfg.SeverityMin
 	}
+	if !commandFlagChanged(cmd, "timeout") && cfg.Timeout != "" {
+		timeout, err := cfg.TimeoutDuration()
+		if err != nil {
+			return fmt.Errorf("configured timeout: %w", err)
+		}
+		auditFlags.timeout = timeout
+	}
+	return nil
+}
+
+// WO-18: Preserve an explicit empty namespace as the all-namespaces choice.
+func effectiveNamespace(cmd *cobra.Command) string {
+	if !commandFlagChanged(cmd, "namespace") && cfg.Namespace != "" {
+		return cfg.Namespace
+	}
+	return namespace
+}
+
+// WO-18: Inspect local and inherited Cobra flag sets without value sentinels.
+func commandFlagChanged(cmd *cobra.Command, name string) bool {
+	for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.InheritedFlags(), cmd.PersistentFlags()} {
+		if flag := flags.Lookup(name); flag != nil && flag.Changed {
+			return true
+		}
+	}
+	return false
+}
+
+// WO-18: Keep command-specific configuration away from flags the command does not expose.
+func commandHasFlag(cmd *cobra.Command, name string) bool {
+	for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.InheritedFlags(), cmd.PersistentFlags()} {
+		if flags.Lookup(name) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// WO-20: Validate configured exclusions before Kubernetes client or scanner work.
+func configuredExclusions() (k8s.Exclusions, error) {
+	exclusions, err := k8s.NewExclusions(cfg.Exclude.Namespaces, cfg.Exclude.Labels)
+	if err != nil {
+		return k8s.Exclusions{}, fmt.Errorf("configured exclusions: %w", err)
+	}
+	return exclusions, nil
 }

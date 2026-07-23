@@ -119,3 +119,35 @@ func TestTextReporterWithErrors(t *testing.T) {
 		t.Error("output missing error detail")
 	}
 }
+
+// WO-16: Keep text findings severity-first while preserving input order for ties.
+func TestTextReporterSortsFindingsBySeverityStable(t *testing.T) {
+	data := testData()
+	data.Findings = []k8s.Finding{
+		{Severity: k8s.SeverityHigh, ResourceID: "high-first"},
+		{Severity: k8s.SeverityLow, ResourceID: "low"},
+		{Severity: k8s.SeverityCritical, ResourceID: "critical"},
+		{Severity: k8s.SeverityHigh, ResourceID: "high-second"},
+		{Severity: k8s.SeverityMedium, ResourceID: "medium"},
+	}
+	data.Summary.TotalFindings = len(data.Findings)
+
+	var buf bytes.Buffer
+	if err := (&TextReporter{Writer: &buf}).Generate(data); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	output := buf.String()
+	wantOrder := []string{"critical", "high-first", "high-second", "medium", "low"}
+	previous := -1
+	for _, resourceID := range wantOrder {
+		index := strings.Index(output, resourceID)
+		if index < 0 {
+			t.Fatalf("output missing resource %q:\n%s", resourceID, output)
+		}
+		if index <= previous {
+			t.Fatalf("resource %q rendered out of order in:\n%s", resourceID, output)
+		}
+		previous = index
+	}
+}

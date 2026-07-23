@@ -19,6 +19,11 @@ func (s *AuditLogScanner) Name() string { return "audit-log" }
 func (s *AuditLogScanner) Audit(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, error) {
 	var findings []Finding
 
+	// WO-23: An excluded control-plane namespace cannot produce an absence inference.
+	if cfg.Exclusions.Matches("kube-system", nil) {
+		return findings, nil
+	}
+
 	// Look for kube-apiserver pod in kube-system
 	pods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
 		LabelSelector: "component=kube-apiserver",
@@ -42,6 +47,10 @@ func (s *AuditLogScanner) Audit(ctx context.Context, client kubernetes.Interface
 	}
 
 	for _, pod := range pods.Items {
+		// WO-23: Enforce exclusions before producing API-server findings.
+		if cfg.Exclusions.Matches(pod.Namespace, pod.Labels) {
+			continue
+		}
 		hasAuditPolicy := false
 		for _, c := range pod.Spec.Containers {
 			for _, arg := range c.Command {

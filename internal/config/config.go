@@ -27,12 +27,16 @@ type Exclude struct {
 }
 
 // TimeoutDuration parses the timeout string as a duration.
-func (c Config) TimeoutDuration() time.Duration {
+// WO-18: Invalid configured deadlines must fail instead of silently disabling protection.
+func (c Config) TimeoutDuration() (time.Duration, error) {
 	if c.Timeout == "" {
-		return 0
+		return 0, nil
 	}
-	d, _ := time.ParseDuration(c.Timeout)
-	return d
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return 0, fmt.Errorf("parse timeout %q: %w", c.Timeout, err)
+	}
+	return d, nil
 }
 
 // Load searches for .kubespectre.yaml or .kubespectre.yml in the given directory

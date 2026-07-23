@@ -123,3 +123,43 @@ func TestAuditLogScanner_ManagedCluster(t *testing.T) {
 		t.Errorf("severity = %q, want %q (informational for managed clusters)", findings[0].Severity, SeverityLow)
 	}
 }
+
+// WO-23: Exclude matching API-server pods without hiding neighboring evidence.
+func TestAuditLogScanner_Exclusions(t *testing.T) {
+	exclusions, err := NewExclusions(nil, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	client := fake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "skip", Namespace: "kube-system", Labels: map[string]string{"component": "kube-apiserver", "scan": "skip"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "kube-apiserver"}}}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "keep", Namespace: "kube-system", Labels: map[string]string{"component": "kube-apiserver"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "kube-apiserver"}}}},
+	)
+
+	findings, err := (&AuditLogScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test", Exclusions: exclusions})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].ResourceID != "keep" {
+		t.Fatalf("findings = %#v, want only neighboring API server", findings)
+	}
+}
+
+// WO-23: An excluded control-plane namespace cannot produce an absence inference.
+func TestAuditLogScanner_ExcludedNamespaceSuppressesManagedInference(t *testing.T) {
+	exclusions, err := NewExclusions([]string{"kube-system"}, nil)
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+
+	findings, err := (&AuditLogScanner{}).Audit(
+		context.Background(),
+		fake.NewSimpleClientset(),
+		AuditConfig{Cluster: "test", Exclusions: exclusions},
+	)
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("findings = %#v, want none for excluded control-plane namespace", findings)
+	}
+}
