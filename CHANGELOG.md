@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0] - 2026-07-23
+
+### Added
+- Configurable scan exclusions in `.kubespectre.yaml` (`exclude.namespaces`, `exclude.labels`): exclude namespaces by exact name or resources by Kubernetes label selector; excluded resources are omitted from findings and evidence
+- Windows release builds (amd64 and arm64), verified in CI
+
+### Changed
+- Text report findings are now sorted by severity (critical first) instead of scan order
+- Explicit `--format`, `--severity-min`, `--timeout`, and `--stale-days` flags now take precedence over config-file values even when set to a default; an explicit empty `--namespace` correctly means all namespaces
+
 ## [0.2.0] - 2026-07-23
 
 ### Added
