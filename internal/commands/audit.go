@@ -45,6 +45,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	return runAuditWithAuditors(cmd, k8s.AllAuditors())
 }
 
+// WO-15: Preserve positive cluster evidence through user-facing report envelopes.
 func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 	ctx := cmd.Context()
 	if auditFlags.timeout > 0 {
@@ -103,9 +104,11 @@ func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 			StaleDays:   auditFlags.staleDays,
 			SeverityMin: auditFlags.severityMin,
 		},
-		Findings: analysis.Findings,
-		Summary:  analysis.Summary,
-		Errors:   analysis.Errors,
+		Findings:             analysis.Findings,
+		Summary:              analysis.Summary,
+		Errors:               analysis.Errors,
+		ClusterPositiveEdges: result.ClusterPositiveEdges, // WO-15: retain sanitized cluster observations in report envelopes.
+		NamespaceCoverage:    result.NamespaceCoverage,    // WO-15: retain proven scope for artifact consumers.
 	}
 
 	reporter, err := selectReporter(auditFlags.format, auditFlags.outputFile)

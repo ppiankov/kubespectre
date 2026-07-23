@@ -14,15 +14,18 @@ type Reporter interface {
 }
 
 // Data holds all information needed to generate a report.
+// WO-15: Preserve sanitized cluster observations and their proven coverage in envelopes.
 type Data struct {
-	Tool      string           `json:"tool"`
-	Version   string           `json:"version"`
-	Timestamp time.Time        `json:"timestamp"`
-	Target    Target           `json:"target"`
-	Config    ReportConfig     `json:"config"`
-	Findings  []k8s.Finding    `json:"findings"`
-	Summary   analyzer.Summary `json:"summary"`
-	Errors    []string         `json:"errors,omitempty"`
+	Tool                 string                    `json:"tool"`
+	Version              string                    `json:"version"`
+	Timestamp            time.Time                 `json:"timestamp"`
+	Target               Target                    `json:"target"`
+	Config               ReportConfig              `json:"config"`
+	Findings             []k8s.Finding             `json:"findings"`
+	Summary              analyzer.Summary          `json:"summary"`
+	Errors               []string                  `json:"errors,omitempty"`
+	ClusterPositiveEdges []k8s.ClusterPositiveEdge `json:"cluster_positive_edges,omitempty"` // WO-15: preserve sanitized observations in JSON envelopes.
+	NamespaceCoverage    []k8s.NamespaceCoverage   `json:"coverage,omitempty"`               // WO-15: preserve proven scope alongside observations.
 }
 
 // Target identifies what was audited.

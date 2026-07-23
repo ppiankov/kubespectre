@@ -1,5 +1,10 @@
 package k8s
 
+import (
+	"encoding/json"
+	"time"
+)
+
 // Severity levels for findings.
 type Severity string
 
@@ -80,10 +85,13 @@ type Finding struct {
 }
 
 // ScanResult holds all findings from scanning a cluster.
+// WO-6: Carry positive observations and independently proven coverage in scan results.
 type ScanResult struct {
-	Findings         []Finding `json:"findings"`
-	Errors           []string  `json:"errors,omitempty"`
-	ResourcesScanned int       `json:"resources_scanned"`
+	Findings             []Finding             `json:"findings"`
+	Errors               []string              `json:"errors,omitempty"`
+	ClusterPositiveEdges []ClusterPositiveEdge `json:"cluster_positive_edges,omitempty"` // WO-6: serialize only each edge's sanitized projection.
+	NamespaceCoverage    []NamespaceCoverage   `json:"coverage,omitempty"`               // WO-6: keep completeness separate from positive observations.
+	ResourcesScanned     int                   `json:"resources_scanned"`
 }
 
 // AuditConfig holds parameters that control auditing behavior.
@@ -93,4 +101,199 @@ type AuditConfig struct {
 	SeverityMin       Severity
 	TrustedRegistries []string
 	Cluster           string
+}
+
+// WO-6: ClusterPositiveEdgeType is closed to the three ratified positive observations.
+type ClusterPositiveEdgeType string
+
+// WO-6: Restrict emitted edge categories to ratified positive observations.
+const (
+	ServiceAccountRoleAnnotationObserved ClusterPositiveEdgeType = "SERVICEACCOUNT_ROLE_ANNOTATION_OBSERVED"
+	WorkloadReferenceObserved            ClusterPositiveEdgeType = "WORKLOAD_REFERENCE_OBSERVED"
+	PodReferenceObserved                 ClusterPositiveEdgeType = "POD_REFERENCE_OBSERVED"
+)
+
+// WO-6: ClusterPositiveEdge is sealed so other packages cannot add absence or verdict variants.
+type ClusterPositiveEdge interface {
+	Type() ClusterPositiveEdgeType
+	Cluster() string
+	Namespace() string
+	ServiceAccount() string
+	ObservedAt() time.Time
+	positiveClusterObservation()
+}
+
+// WO-6: clusterPositiveEdgeBase keeps raw correlation identity out of default serialization.
+type clusterPositiveEdgeBase struct {
+	cluster        string    // WO-6: correlation identity stays private.
+	namespace      string    // WO-6: correlation identity stays private.
+	serviceAccount string    // WO-6: correlation identity stays private.
+	observedAt     time.Time // WO-6: read-time freshness remains available to projections.
+}
+
+// WO-6: clusterPositiveEdgeProjection exposes observation kind and freshness, never identity.
+type clusterPositiveEdgeProjection struct {
+	Type       ClusterPositiveEdgeType `json:"type"`        // WO-6: the ratified observation category.
+	ObservedAt time.Time               `json:"observed_at"` // WO-6: source-collection time, not upload time.
+}
+
+// WO-6: marshalClusterPositiveEdge deliberately excludes raw correlation identity.
+func marshalClusterPositiveEdge(edgeType ClusterPositiveEdgeType, observedAt time.Time) ([]byte, error) {
+	return json.Marshal(clusterPositiveEdgeProjection{Type: edgeType, ObservedAt: observedAt})
+}
+
+// WO-6: these accessors expose identity only to explicit in-process correlation.
+func (e clusterPositiveEdgeBase) Cluster() string { return e.cluster }
+
+// WO-6: Expose namespace identity only for explicit in-process correlation.
+func (e clusterPositiveEdgeBase) Namespace() string { return e.namespace }
+
+// WO-6: Expose service-account identity only for explicit in-process correlation.
+func (e clusterPositiveEdgeBase) ServiceAccount() string { return e.serviceAccount }
+
+// WO-6: Expose the source-collection instant for freshness checks.
+func (e clusterPositiveEdgeBase) ObservedAt() time.Time { return e.observedAt }
+
+// WO-6: newClusterPositiveEdgeBase structurally rejects incomplete observations.
+func newClusterPositiveEdgeBase(
+	cluster, namespace, serviceAccount string,
+	observedAt time.Time,
+) (clusterPositiveEdgeBase, bool) {
+	if cluster == "" || namespace == "" || serviceAccount == "" || observedAt.IsZero() {
+		return clusterPositiveEdgeBase{}, false
+	}
+	return clusterPositiveEdgeBase{
+		cluster:        cluster,
+		namespace:      namespace,
+		serviceAccount: serviceAccount,
+		observedAt:     observedAt,
+	}, true
+}
+
+// WO-6: serviceAccountRoleAnnotationObservedEdge can represent only observed annotations.
+type serviceAccountRoleAnnotationObservedEdge struct {
+	clusterPositiveEdgeBase
+	roleARN string // WO-6: retained privately for explicit correlation.
+}
+
+// WO-6: NewServiceAccountRoleAnnotationObservedEdge requires a concrete positive annotation.
+func NewServiceAccountRoleAnnotationObservedEdge(
+	cluster, namespace, serviceAccount, roleARN string,
+	observedAt time.Time,
+) ClusterPositiveEdge {
+	base, ok := newClusterPositiveEdgeBase(cluster, namespace, serviceAccount, observedAt)
+	if !ok || roleARN == "" {
+		return nil
+	}
+	return serviceAccountRoleAnnotationObservedEdge{clusterPositiveEdgeBase: base, roleARN: roleARN}
+}
+
+// WO-6: Report the sealed service-account annotation observation category.
+func (serviceAccountRoleAnnotationObservedEdge) Type() ClusterPositiveEdgeType {
+	return ServiceAccountRoleAnnotationObserved
+}
+
+// WO-6: Seal service-account annotation observations to this package.
+func (serviceAccountRoleAnnotationObservedEdge) positiveClusterObservation() {}
+
+// WO-6: MarshalJSON emits the sanitized artifact projection.
+func (e serviceAccountRoleAnnotationObservedEdge) MarshalJSON() ([]byte, error) {
+	return marshalClusterPositiveEdge(e.Type(), e.ObservedAt())
+}
+
+// ServiceAccountRoleAnnotationEvidence exposes the role only for a validated WO-6 annotation edge.
+// WO-6: Keep raw role identity behind explicit in-process access.
+func ServiceAccountRoleAnnotationEvidence(edge ClusterPositiveEdge) (string, bool) {
+	typed, ok := edge.(serviceAccountRoleAnnotationObservedEdge)
+	if !ok {
+		return "", false
+	}
+	return typed.roleARN, true
+}
+
+// WO-6: workloadReferenceObservedEdge can represent only observed workload references.
+type workloadReferenceObservedEdge struct {
+	clusterPositiveEdgeBase
+	workloadKind string // WO-6: retained privately for explicit correlation.
+	workloadName string // WO-6: retained privately for explicit correlation.
+}
+
+// WO-6: NewWorkloadReferenceObservedEdge requires a concrete workload-to-SA reference.
+func NewWorkloadReferenceObservedEdge(
+	cluster, namespace, serviceAccount, workloadKind, workloadName string,
+	observedAt time.Time,
+) ClusterPositiveEdge {
+	base, ok := newClusterPositiveEdgeBase(cluster, namespace, serviceAccount, observedAt)
+	if !ok || workloadKind == "" || workloadName == "" {
+		return nil
+	}
+	return workloadReferenceObservedEdge{
+		clusterPositiveEdgeBase: base,
+		workloadKind:            workloadKind,
+		workloadName:            workloadName,
+	}
+}
+
+// WO-6: Report the sealed workload reference observation category.
+func (workloadReferenceObservedEdge) Type() ClusterPositiveEdgeType {
+	return WorkloadReferenceObserved
+}
+
+// WO-6: Seal workload reference observations to this package.
+func (workloadReferenceObservedEdge) positiveClusterObservation() {}
+
+// WO-6: MarshalJSON emits the sanitized artifact projection.
+func (e workloadReferenceObservedEdge) MarshalJSON() ([]byte, error) {
+	return marshalClusterPositiveEdge(e.Type(), e.ObservedAt())
+}
+
+// WorkloadReferenceEvidence exposes workload identity only for a validated WO-6 reference edge.
+// WO-6: Keep raw workload identity behind explicit in-process access.
+func WorkloadReferenceEvidence(edge ClusterPositiveEdge) (string, string, bool) {
+	typed, ok := edge.(workloadReferenceObservedEdge)
+	if !ok {
+		return "", "", false
+	}
+	return typed.workloadKind, typed.workloadName, true
+}
+
+// WO-6: podReferenceObservedEdge can represent only observed pod references.
+type podReferenceObservedEdge struct {
+	clusterPositiveEdgeBase
+	podName string // WO-6: retained privately for explicit correlation.
+}
+
+// WO-6: NewPodReferenceObservedEdge requires a concrete pod-to-SA reference.
+func NewPodReferenceObservedEdge(
+	cluster, namespace, serviceAccount, podName string,
+	observedAt time.Time,
+) ClusterPositiveEdge {
+	base, ok := newClusterPositiveEdgeBase(cluster, namespace, serviceAccount, observedAt)
+	if !ok || podName == "" {
+		return nil
+	}
+	return podReferenceObservedEdge{clusterPositiveEdgeBase: base, podName: podName}
+}
+
+// WO-6: Report the sealed pod reference observation category.
+func (podReferenceObservedEdge) Type() ClusterPositiveEdgeType {
+	return PodReferenceObserved
+}
+
+// WO-6: Seal pod reference observations to this package.
+func (podReferenceObservedEdge) positiveClusterObservation() {}
+
+// WO-6: MarshalJSON emits the sanitized artifact projection.
+func (e podReferenceObservedEdge) MarshalJSON() ([]byte, error) {
+	return marshalClusterPositiveEdge(e.Type(), e.ObservedAt())
+}
+
+// PodReferenceEvidence exposes pod identity only for a validated WO-6 reference edge.
+// WO-6: Keep raw pod identity behind explicit in-process access.
+func PodReferenceEvidence(edge ClusterPositiveEdge) (string, bool) {
+	typed, ok := edge.(podReferenceObservedEdge)
+	if !ok {
+		return "", false
+	}
+	return typed.podName, true
 }

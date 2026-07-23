@@ -2,11 +2,20 @@ package k8s
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestServiceAccountScanner_DefaultSA(t *testing.T) {
@@ -190,4 +199,251 @@ func TestServiceAccountScanner_NamespaceFilter(t *testing.T) {
 	if len(findings) != 1 {
 		t.Errorf("got %d findings, want 1 (only prod)", len(findings))
 	}
+}
+
+// WO-6: Keep missing-client handling defensive after extracting pod collection.
+func TestServiceAccountScannerNilClientReturnsError(t *testing.T) {
+	_, err := (&ServiceAccountScanner{}).Audit(context.Background(), nil, AuditConfig{})
+	if !errors.Is(err, errCoverageClientUnavailable) {
+		t.Fatalf("error = %v, want unavailable client", err)
+	}
+}
+
+// WO-6: Preserve the original pod-list error identity for direct callers.
+func TestServiceAccountScannerPreservesPodListError(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	wantErr := errors.New("pod API unavailable")
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, wantErr
+	})
+
+	_, err := (&ServiceAccountScanner{}).Audit(context.Background(), client, AuditConfig{})
+	if err != wantErr {
+		t.Fatalf("error = %v, want original error %v", err, wantErr)
+	}
+}
+
+// WO-6: Prove a covered namespace yields annotation, workload, and pod observations.
+func TestServiceAccountScannerCollectsPositiveEdgesInProvenNamespace(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 2, 3, 4, 0, time.UTC)
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		&corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "checkout",
+				Namespace: "payments",
+				Annotations: map[string]string{
+					serviceAccountRoleARNAnnotation: "arn:aws:iam::123456789012:role/checkout",
+				},
+			},
+		},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "bare", Namespace: "payments"}},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "checkout", Namespace: "payments"},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "checkout"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "checkout"}},
+					Spec: corev1.PodSpec{
+						ServiceAccountName:           "checkout",
+						AutomountServiceAccountToken: boolPtr(false),
+						Containers:                   []corev1.Container{{Name: "app"}},
+					},
+				},
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "checkout-pod", Namespace: "payments"},
+			Spec: corev1.PodSpec{
+				ServiceAccountName:           "checkout",
+				AutomountServiceAccountToken: boolPtr(false),
+				Containers:                   []corev1.Container{{Name: "app"}},
+			},
+		},
+	)
+	allowServiceAccountList(client, true)
+	scanner := &ServiceAccountScanner{now: func() time.Time { return observedAt }}
+
+	result, err := scanner.auditWithEvidence(context.Background(), client, AuditConfig{Cluster: "prod"})
+	if err != nil {
+		t.Fatalf("audit with evidence: %v", err)
+	}
+	if len(result.ClusterPositiveEdges) != 3 {
+		t.Fatalf("positive edges = %#v, want annotation, workload, and pod", result.ClusterPositiveEdges)
+	}
+	if len(result.Coverage) != 1 || result.Coverage[0].State != NamespaceCoverageComplete {
+		t.Fatalf("coverage = %#v, want one complete namespace", result.Coverage)
+	}
+
+	wantTypes := []ClusterPositiveEdgeType{
+		ServiceAccountRoleAnnotationObserved,
+		WorkloadReferenceObserved,
+		PodReferenceObserved,
+	}
+	for i, edge := range result.ClusterPositiveEdges {
+		if edge.Type() != wantTypes[i] {
+			t.Errorf("edge %d type = %q, want %q", i, edge.Type(), wantTypes[i])
+		}
+		if !edge.ObservedAt().Equal(observedAt) {
+			t.Errorf("edge %d observed at = %s, want %s", i, edge.ObservedAt(), observedAt)
+		}
+	}
+	if roleARN, ok := ServiceAccountRoleAnnotationEvidence(result.ClusterPositiveEdges[0]); !ok || roleARN == "" {
+		t.Errorf("annotation evidence = %q, %v", roleARN, ok)
+	}
+	if kind, name, ok := WorkloadReferenceEvidence(result.ClusterPositiveEdges[1]); !ok || kind != "Deployment" || name != "checkout" {
+		t.Errorf("workload evidence = %q/%q, %v", kind, name, ok)
+	}
+	if name, ok := PodReferenceEvidence(result.ClusterPositiveEdges[2]); !ok || name != "checkout-pod" {
+		t.Errorf("pod evidence = %q, %v", name, ok)
+	}
+}
+
+// WO-6: Prove unknown coverage suppresses every positive edge category.
+func TestServiceAccountScannerUnknownCoverageEmitsNoEdges(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		&corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "checkout",
+				Namespace:   "payments",
+				Annotations: map[string]string{serviceAccountRoleARNAnnotation: "role"},
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "checkout-pod", Namespace: "payments"},
+			Spec: corev1.PodSpec{
+				ServiceAccountName:           "checkout",
+				AutomountServiceAccountToken: boolPtr(false),
+				Containers:                   []corev1.Container{{Name: "app"}},
+			},
+		},
+	)
+	allowServiceAccountList(client, false)
+	scanner := &ServiceAccountScanner{}
+
+	result, err := scanner.auditWithEvidence(context.Background(), client, AuditConfig{Cluster: "prod"})
+	if err != nil {
+		t.Fatalf("audit with evidence: %v", err)
+	}
+	if len(result.ClusterPositiveEdges) != 0 {
+		t.Errorf("positive edges = %#v, want none", result.ClusterPositiveEdges)
+	}
+	if len(result.Coverage) != 1 || result.Coverage[0].State != NamespaceCoverageUnknown {
+		t.Fatalf("coverage = %#v, want one unknown namespace", result.Coverage)
+	}
+}
+
+// WO-6: Prove failed enumeration downgrades permitted scope to unknown.
+func TestServiceAccountScannerEnumerationFailureDowngradesCoverage(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+	)
+	allowServiceAccountList(client, true)
+	wantErr := errors.New("serviceaccount API unavailable")
+	client.PrependReactor("list", "serviceaccounts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, wantErr
+	})
+
+	result, err := (&ServiceAccountScanner{}).auditWithEvidence(
+		context.Background(),
+		client,
+		AuditConfig{Cluster: "prod"},
+	)
+	if err != nil {
+		t.Fatalf("audit with evidence: %v", err)
+	}
+	if len(result.Coverage) != 1 || result.Coverage[0].State != NamespaceCoverageUnknown {
+		t.Fatalf("coverage = %#v, want one unknown namespace", result.Coverage)
+	}
+	if len(result.ClusterPositiveEdges) != 0 {
+		t.Errorf("positive edges = %#v, want none", result.ClusterPositiveEdges)
+	}
+	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0], wantErr.Error()) {
+		t.Fatalf("collection errors = %#v, want observable serviceaccount failure", result.Errors)
+	}
+}
+
+// WO-6: Cover every supported workload reference with deterministic ordering.
+func TestServiceAccountScannerCollectsAllWorkloadKindsInStableOrder(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 5, 6, 7, 0, time.UTC)
+	podTemplate := corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+		ServiceAccountName: "runtime-sa",
+		Containers:         []corev1.Container{{Name: "app"}},
+	}}
+	selector := &metav1.LabelSelector{MatchLabels: map[string]string{"app": "runtime"}}
+	client := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments"}},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "deploy", Namespace: "payments"},
+			Spec:       appsv1.DeploymentSpec{Selector: selector, Template: podTemplate},
+		},
+		&appsv1.StatefulSet{
+			ObjectMeta: metav1.ObjectMeta{Name: "stateful", Namespace: "payments"},
+			Spec:       appsv1.StatefulSetSpec{Selector: selector, Template: podTemplate},
+		},
+		&appsv1.DaemonSet{
+			ObjectMeta: metav1.ObjectMeta{Name: "daemon", Namespace: "payments"},
+			Spec:       appsv1.DaemonSetSpec{Selector: selector, Template: podTemplate},
+		},
+		&batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "payments"},
+			Spec:       batchv1.JobSpec{Template: podTemplate},
+		},
+		&batchv1.CronJob{
+			ObjectMeta: metav1.ObjectMeta{Name: "cron", Namespace: "payments"},
+			Spec: batchv1.CronJobSpec{
+				Schedule:    "0 * * * *",
+				JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: podTemplate}},
+			},
+		},
+	)
+	allowServiceAccountList(client, true)
+	scanner := &ServiceAccountScanner{now: func() time.Time { return observedAt }}
+
+	result, err := scanner.auditWithEvidence(context.Background(), client, AuditConfig{Cluster: "prod"})
+	if err != nil {
+		t.Fatalf("audit with evidence: %v", err)
+	}
+	if len(result.ClusterPositiveEdges) != 5 {
+		t.Fatalf("positive edges = %#v, want five workload edges", result.ClusterPositiveEdges)
+	}
+	want := []struct {
+		kind string
+		name string
+	}{
+		{kind: "CronJob", name: "cron"},
+		{kind: "DaemonSet", name: "daemon"},
+		{kind: "Deployment", name: "deploy"},
+		{kind: "Job", name: "job"},
+		{kind: "StatefulSet", name: "stateful"},
+	}
+	for i, edge := range result.ClusterPositiveEdges {
+		kind, name, ok := WorkloadReferenceEvidence(edge)
+		if !ok || kind != want[i].kind || name != want[i].name {
+			t.Errorf("edge %d evidence = %q/%q, %v; want %q/%q", i, kind, name, ok, want[i].kind, want[i].name)
+		}
+		if edge.ServiceAccount() != "runtime-sa" || !edge.ObservedAt().Equal(observedAt) {
+			t.Errorf("edge %d identity/time = %q/%s, want runtime-sa/%s", i, edge.ServiceAccount(), edge.ObservedAt(), observedAt)
+		}
+	}
+
+	encoded, err := json.Marshal(result.ClusterPositiveEdges)
+	if err != nil {
+		t.Fatalf("marshal workload edges: %v", err)
+	}
+	for _, privateValue := range []string{"prod", "payments", "runtime-sa", "cron", "daemon", "deploy", "job", "stateful"} {
+		if strings.Contains(string(encoded), privateValue) {
+			t.Errorf("serialized edges expose private value %q: %s", privateValue, encoded)
+		}
+	}
+}
+
+// WO-6: Model definitive SSAR permission without weakening production checks.
+func allowServiceAccountList(client *fake.Clientset, allowed bool) {
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authorizationv1.SelfSubjectAccessReview{
+			Status: authorizationv1.SubjectAccessReviewStatus{Allowed: allowed},
+		}, nil
+	})
 }

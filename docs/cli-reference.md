@@ -51,6 +51,13 @@ trusted_registries:
   - us-docker.pkg.dev/my-project
 ```
 
+### JSON output
+
+With `--format json`, the audit envelope may include two additional fields:
+
+- `cluster_positive_edges` — observed IAM correlation signals (ServiceAccount role annotations, workload references, pod references). Each edge serializes only its observation category and source-collection timestamp; raw identity is never emitted.
+- `coverage` — per-namespace scope proof. A namespace is `complete` only when a SelfSubjectAccessReview confirms permission to list ServiceAccounts in it; otherwise it is `unknown`. Uncovered namespaces produce no absence claim.
+
 
 ## Architecture
 
@@ -62,5 +69,5 @@ trusted_registries:
 
 ## Project Status
 
-**Status: Alpha** | v0.1.0
+**Status: Alpha** | v0.2.0
 
