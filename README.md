@@ -1,10 +1,9 @@
 # kubespectre
 
 [![CI](https://github.com/ppiankov/kubespectre/actions/workflows/ci.yml/badge.svg)](https://github.com/ppiankov/kubespectre/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ppiankov/kubespectre)](https://goreportcard.com/report/github.com/ppiankov/kubespectre)
 [![ANCC](https://img.shields.io/badge/ANCC-compliant-brightgreen)](https://ancc.dev)
 
-**kubespectre** — Kubernetes security posture auditor. Part of [SpectreHub](https://github.com/ppiankov/spectrehub).
+**kubespectre** — Kubernetes security posture auditor. Part of [SpectreHub](https://spectrehub.dev).
 
 ## What it is
 
@@ -63,7 +62,7 @@ kubespectre audit --kubeconfig ~/.kube/config --format json
 
 ## SpectreHub integration
 
-kubespectre feeds Kubernetes security findings into [SpectreHub](https://github.com/ppiankov/spectrehub) for unified visibility across your infrastructure.
+kubespectre feeds Kubernetes security findings into [SpectreHub](https://spectrehub.dev) for unified visibility across your infrastructure.
 
 ```sh
 spectrehub collect --tool kubespectre

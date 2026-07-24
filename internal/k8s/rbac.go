@@ -16,12 +16,19 @@ type RBACScanner struct{}
 func (s *RBACScanner) Name() string { return "rbac" }
 
 func (s *RBACScanner) Audit(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, error) {
+	// WO-25: preserve the posture-only contract; discard the scanned-object count.
+	findings, _, err := s.auditWithCount(ctx, client, cfg)
+	return findings, err
+}
+
+// WO-25: auditWithCount reports the ClusterRoleBindings and ClusterRoles examined.
+func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, int, error) {
 	var findings []Finding
 
 	// Check ClusterRoleBindings for cluster-admin bound to non-system subjects
 	bindings, err := client.RbacV1().ClusterRoleBindings().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list cluster role bindings: %w", err)
+		return nil, 0, fmt.Errorf("list cluster role bindings: %w", err)
 	}
 
 	for _, crb := range bindings.Items {
@@ -49,7 +56,7 @@ func (s *RBACScanner) Audit(ctx context.Context, client kubernetes.Interface, cf
 	// Check ClusterRoles for wildcard verbs or resources
 	roles, err := client.RbacV1().ClusterRoles().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list cluster roles: %w", err)
+		return nil, 0, fmt.Errorf("list cluster roles: %w", err)
 	}
 
 	for _, role := range roles.Items {
@@ -75,7 +82,8 @@ func (s *RBACScanner) Audit(ctx context.Context, client kubernetes.Interface, cf
 		}
 	}
 
-	return findings, nil
+	// WO-25: count every cluster-scoped RBAC object listed, not just the flagged ones.
+	return findings, len(bindings.Items) + len(roles.Items), nil
 }
 
 func isSystemSubject(name, namespace string) bool {

@@ -85,18 +85,66 @@ type Finding struct {
 }
 
 // WO-24: ClusterPositiveEdgeProjection is the machine-readable edge schema.
+// WO-29: identity join keys are UNEXPORTED so no external caller can populate
+// them with a struct literal and bypass the join-key gate. Only Type and
+// ObservedAt are exported; identity serializes solely when the constructor
+// ProjectClusterPositiveEdge was asked to include join keys. This restores the
+// WO-6 "prevent structurally" boundary that the earlier exported-field design
+// downgraded to "control-by-option".
 type ClusterPositiveEdgeProjection struct {
 	Type       ClusterPositiveEdgeType `json:"type"`
 	ObservedAt time.Time               `json:"observed_at"`
-	// WO-24: expose namespace+service account only on explicit join-key surfaces.
-	Namespace      string `json:"namespace,omitempty"`
-	ServiceAccount string `json:"service_account,omitempty"`
-	// WO-24: role ARN identifies annotation edges for IAM correlation.
-	RoleARN string `json:"role_arn,omitempty"`
-	// WO-24: workload edges include workload kind/name join keys.
-	WorkloadKind string `json:"workload_kind,omitempty"`
-	WorkloadName string `json:"workload_name,omitempty"`
-	PodName      string `json:"pod_name,omitempty"`
+
+	// WO-29: identity is gated behind the constructor, never a literal.
+	includeJoinKeys bool
+	namespace       string
+	serviceAccount  string
+	roleARN         string
+	workloadKind    string
+	workloadName    string
+	podName         string
+}
+
+// WO-29: sanitizedEdgeProjection is the default serialization — no identity.
+type sanitizedEdgeProjection struct {
+	Type       ClusterPositiveEdgeType `json:"type"`
+	ObservedAt time.Time               `json:"observed_at"`
+}
+
+// WO-29: joinKeyEdgeProjection is the opt-in serialization carrying join keys.
+// Field names and omitempty match the pre-WO-29 wire schema exactly so consumers
+// are unaffected.
+type joinKeyEdgeProjection struct {
+	Type           ClusterPositiveEdgeType `json:"type"`
+	ObservedAt     time.Time               `json:"observed_at"`
+	Namespace      string                  `json:"namespace,omitempty"`
+	ServiceAccount string                  `json:"service_account,omitempty"`
+	RoleARN        string                  `json:"role_arn,omitempty"`
+	WorkloadKind   string                  `json:"workload_kind,omitempty"`
+	WorkloadName   string                  `json:"workload_name,omitempty"`
+	PodName        string                  `json:"pod_name,omitempty"`
+}
+
+// WO-29: MarshalJSON emits identity join keys only when the constructor enabled
+// them. A zero-value or externally built projection can never leak identity
+// because the gate and the identity fields are both unexported.
+func (p ClusterPositiveEdgeProjection) MarshalJSON() ([]byte, error) {
+	if !p.includeJoinKeys {
+		return json.Marshal(sanitizedEdgeProjection{
+			Type:       p.Type,
+			ObservedAt: p.ObservedAt,
+		})
+	}
+	return json.Marshal(joinKeyEdgeProjection{
+		Type:           p.Type,
+		ObservedAt:     p.ObservedAt,
+		Namespace:      p.namespace,
+		ServiceAccount: p.serviceAccount,
+		RoleARN:        p.roleARN,
+		WorkloadKind:   p.workloadKind,
+		WorkloadName:   p.workloadName,
+		PodName:        p.podName,
+	})
 }
 
 // ScanResult holds all findings from scanning a cluster.
@@ -174,18 +222,20 @@ func ProjectClusterPositiveEdge(
 		return projection
 	}
 
-	projection.Namespace = edge.Namespace()
-	projection.ServiceAccount = edge.ServiceAccount()
+	// WO-29: only the constructor may open the join-key gate and set identity.
+	projection.includeJoinKeys = true
+	projection.namespace = edge.Namespace()
+	projection.serviceAccount = edge.ServiceAccount()
 
 	if roleARN, ok := ServiceAccountRoleAnnotationEvidence(edge); ok {
-		projection.RoleARN = roleARN
+		projection.roleARN = roleARN
 	}
 	if kind, name, ok := WorkloadReferenceEvidence(edge); ok {
-		projection.WorkloadKind = kind
-		projection.WorkloadName = name
+		projection.workloadKind = kind
+		projection.workloadName = name
 	}
 	if podName, ok := PodReferenceEvidence(edge); ok {
-		projection.PodName = podName
+		projection.podName = podName
 	}
 	return projection
 }

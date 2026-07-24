@@ -71,6 +71,12 @@ exclude:
 Namespace exclusions are exact names. Label exclusions use Kubernetes selector
 syntax, and a resource is excluded when any configured selector matches.
 
+An excluded namespace is treated as fully out of scope: it produces **no
+findings, no `cluster_positive_edges`, and no `coverage` entry**. It is absent
+from the artifact entirely — it is not marked "excluded" and carries no scope
+proof. Consumers correlating on completeness should read an excluded namespace
+as absent evidence, not as a scanned-but-clean namespace.
+
 ### JSON output
 
 With `--format json`, the audit envelope may include two additional fields:
@@ -86,6 +92,12 @@ Use `--include-edge-join-keys` to opt in to non-sensitive join keys for downstre
 
 Join-key output is disabled by default.
 - `coverage` — per-namespace scope proof. A namespace is `complete` only when a SelfSubjectAccessReview confirms permission to list ServiceAccounts in it; otherwise it is `unknown`. Uncovered namespaces produce no absence claim.
+
+The `summary.total_resources_scanned` field reports the aggregate number of
+Kubernetes objects the audit examined across all auditors. It is a scan-operation
+count, not a distinct-object count: an object inspected by more than one auditor
+(for example a pod is examined by the pod-security, image, and service-account
+auditors) is counted once per auditor.
 
 
 ## Architecture

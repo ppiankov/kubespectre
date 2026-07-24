@@ -481,6 +481,87 @@ func TestServiceAccountScannerAppliesExclusionsToEvidence(t *testing.T) {
 	}
 }
 
+// WO-26: Pin that an excluded namespace yields neither positive cluster edges
+// nor a coverage entry — it is absent from the artifact, not marked "excluded".
+// A "kept" namespace with an identical shape acts as the control proving the
+// fixture would otherwise emit all three edge kinds and a coverage entry.
+func TestServiceAccountScannerExcludedNamespaceHasNoEdgesOrCoverage(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 6, 7, 8, 0, time.UTC)
+	exclusions, err := NewExclusions([]string{"excluded"}, nil)
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+
+	newNamespaceFixture := func(namespace string) []runtime.Object {
+		annotatedSA := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+			Name:        "checkout-sa",
+			Namespace:   namespace,
+			Annotations: map[string]string{serviceAccountRoleARNAnnotation: namespace + "-role"},
+		}}
+		deployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "checkout", Namespace: namespace},
+			Spec: appsv1.DeploymentSpec{
+				Selector: &metav1.LabelSelector{},
+				Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{ServiceAccountName: "checkout-sa"}},
+			},
+		}
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "checkout-pod", Namespace: namespace},
+			Spec: corev1.PodSpec{
+				ServiceAccountName:           "checkout-sa",
+				AutomountServiceAccountToken: boolPtr(false),
+				Containers:                   []corev1.Container{{Name: "app"}},
+			},
+		}
+		return []runtime.Object{
+			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}},
+			annotatedSA, deployment, pod,
+		}
+	}
+
+	objects := append(newNamespaceFixture("excluded"), newNamespaceFixture("kept")...)
+	client := fake.NewSimpleClientset(objects...)
+	allowServiceAccountList(client, true)
+
+	scanner := &ServiceAccountScanner{now: func() time.Time { return observedAt }}
+	result, err := scanner.auditWithEvidence(context.Background(), client, AuditConfig{
+		Cluster:    "prod",
+		Exclusions: exclusions,
+	})
+	if err != nil {
+		t.Fatalf("auditWithEvidence() error = %v", err)
+	}
+
+	// The excluded namespace must contribute zero positive edges.
+	for _, edge := range result.ClusterPositiveEdges {
+		if edge.Namespace() == "excluded" {
+			t.Fatalf("excluded namespace produced a positive edge: %#v", edge)
+		}
+	}
+	// The excluded namespace must have no coverage entry at all.
+	for _, coverage := range result.Coverage {
+		if coverage.Namespace == "excluded" {
+			t.Fatalf("excluded namespace produced a coverage entry: %#v", coverage)
+		}
+	}
+
+	// Control: the identically shaped "kept" namespace proves the fixture is
+	// meaningful — it emits all three edge kinds and exactly one coverage entry.
+	keptEdges := 0
+	for _, edge := range result.ClusterPositiveEdges {
+		if edge.Namespace() == "kept" {
+			keptEdges++
+		}
+	}
+	if keptEdges != 3 {
+		t.Fatalf("kept namespace edges = %d, want 3 (annotation, workload, pod)", keptEdges)
+	}
+	if len(result.Coverage) != 1 || result.Coverage[0].Namespace != "kept" ||
+		result.Coverage[0].State != NamespaceCoverageComplete {
+		t.Fatalf("coverage = %#v, want only kept namespace complete", result.Coverage)
+	}
+}
+
 // WO-6: Model definitive SSAR permission without weakening production checks.
 func allowServiceAccountList(client *fake.Clientset, allowed bool) {
 	client.PrependReactor("create", "selfsubjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {

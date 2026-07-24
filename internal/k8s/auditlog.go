@@ -17,11 +17,18 @@ type AuditLogScanner struct{}
 func (s *AuditLogScanner) Name() string { return "audit-log" }
 
 func (s *AuditLogScanner) Audit(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, error) {
+	// WO-25: preserve the posture-only contract; discard the scanned-object count.
+	findings, _, err := s.auditWithCount(ctx, client, cfg)
+	return findings, err
+}
+
+// WO-25: auditWithCount reports the kube-apiserver pods examined for audit policy.
+func (s *AuditLogScanner) auditWithCount(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, int, error) {
 	var findings []Finding
 
 	// WO-23: An excluded control-plane namespace cannot produce an absence inference.
 	if cfg.Exclusions.Matches("kube-system", nil) {
-		return findings, nil
+		return findings, 0, nil
 	}
 
 	// Look for kube-apiserver pod in kube-system
@@ -29,7 +36,7 @@ func (s *AuditLogScanner) Audit(ctx context.Context, client kubernetes.Interface
 		LabelSelector: "component=kube-apiserver",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list kube-apiserver pods: %w", err)
+		return nil, 0, fmt.Errorf("list kube-apiserver pods: %w", err)
 	}
 
 	if len(pods.Items) == 0 {
@@ -43,7 +50,7 @@ func (s *AuditLogScanner) Audit(ctx context.Context, client kubernetes.Interface
 			Cluster:      cfg.Cluster,
 			Message:      "kube-apiserver pod not found (managed cluster?); audit policy cannot be verified",
 		})
-		return findings, nil
+		return findings, 0, nil
 	}
 
 	for _, pod := range pods.Items {
@@ -86,5 +93,6 @@ func (s *AuditLogScanner) Audit(ctx context.Context, client kubernetes.Interface
 		}
 	}
 
-	return findings, nil
+	// WO-25: count the kube-apiserver pods actually examined for audit policy.
+	return findings, len(pods.Items), nil
 }

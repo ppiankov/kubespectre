@@ -42,6 +42,91 @@ func (s *stubEvidenceAuditor) auditWithEvidence(
 	return s.result, s.evidenceErr
 }
 
+// WO-25: stubCountingAuditor reports a fixed scanned-object count for the
+// aggregation regression tests.
+type stubCountingAuditor struct {
+	stubAuditor
+	scanned int
+}
+
+// WO-25: return the controlled findings and scanned count for AuditAll.
+func (s *stubCountingAuditor) auditWithCount(
+	context.Context,
+	kubernetes.Interface,
+	AuditConfig,
+) ([]Finding, int, error) {
+	return s.findings, s.scanned, s.err
+}
+
+// WO-25: AuditAll must sum every auditor's scanned-object count into the result
+// so total_resources_scanned is no longer pinned at zero. Auditors that do not
+// report a count (legacy Audit-only) contribute zero rather than breaking.
+func TestMultiAuditorAccumulatesResourcesScanned(t *testing.T) {
+	auditors := []Auditor{
+		&stubCountingAuditor{stubAuditor: stubAuditor{name: "rbac", findings: []Finding{{ID: FindingWildcardRBAC}}}, scanned: 12},
+		&stubCountingAuditor{stubAuditor: stubAuditor{name: "pods", findings: []Finding{{ID: FindingHostNetwork}}}, scanned: 30},
+		&stubAuditor{name: "legacy", findings: []Finding{{ID: FindingStaleSecret}}},
+	}
+
+	result, err := NewMultiAuditor(nil, auditors, 3).AuditAll(context.Background(), AuditConfig{})
+	if err != nil {
+		t.Fatalf("audit all: %v", err)
+	}
+	if result.ResourcesScanned != 42 {
+		t.Fatalf("ResourcesScanned = %d, want 42 (12+30+0)", result.ResourcesScanned)
+	}
+}
+
+// WO-25: a failed counting auditor records its error and contributes zero to the
+// scanned total without suppressing the counts of healthy auditors.
+func TestMultiAuditorFailedCountingAuditorContributesZero(t *testing.T) {
+	auditors := []Auditor{
+		&stubCountingAuditor{stubAuditor: stubAuditor{name: "ok", findings: []Finding{{ID: FindingWildcardRBAC}}}, scanned: 7},
+		&stubCountingAuditor{stubAuditor: stubAuditor{name: "fail", err: errors.New("connection refused")}, scanned: 99},
+	}
+
+	result, err := NewMultiAuditor(nil, auditors, 2).AuditAll(context.Background(), AuditConfig{})
+	if err != nil {
+		t.Fatalf("audit all: %v", err)
+	}
+	if result.ResourcesScanned != 7 {
+		t.Fatalf("ResourcesScanned = %d, want 7 (failed auditor adds nothing)", result.ResourcesScanned)
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("errors = %#v, want one", result.Errors)
+	}
+}
+
+// WO-25: real auditors report the objects they enumerate through AuditAll, so a
+// run that scans resources reports a nonzero total. PodSecurity and Image both
+// enumerate pods, so two pods yield four scanned units (once per auditor).
+func TestMultiAuditorRealAuditorsReportNonzeroResourcesScanned(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "app-a", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "app-b", Namespace: "prod"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
+		},
+	)
+
+	result, err := NewMultiAuditor(client, []Auditor{&PodSecurityScanner{}, &ImageScanner{}}, 2).AuditAll(
+		context.Background(),
+		AuditConfig{Cluster: "test"},
+	)
+	if err != nil {
+		t.Fatalf("audit all: %v", err)
+	}
+	if result.ResourcesScanned == 0 {
+		t.Fatal("ResourcesScanned = 0, want nonzero after scanning pods")
+	}
+	if result.ResourcesScanned != 4 {
+		t.Fatalf("ResourcesScanned = %d, want 4 (2 pods x PodSecurity+Image)", result.ResourcesScanned)
+	}
+}
+
 func TestMultiAuditorAuditAll(t *testing.T) {
 	finding1 := Finding{ID: FindingWildcardRBAC, Severity: SeverityCritical, Message: "wildcard"}
 	finding2 := Finding{ID: FindingHostNetwork, Severity: SeverityHigh, Message: "host network"}
@@ -183,6 +268,10 @@ func TestMultiAuditorMergesPositiveEdgesAndCoverage(t *testing.T) {
 	}
 	if len(result.NamespaceCoverage) != 1 || result.NamespaceCoverage[0].State != NamespaceCoverageComplete {
 		t.Fatalf("coverage = %#v, want one complete namespace", result.NamespaceCoverage)
+	}
+	// WO-25: the evidence-path auditor reports its scanned pod through the summary.
+	if result.ResourcesScanned != 1 {
+		t.Fatalf("ResourcesScanned = %d, want 1 (single scanned pod)", result.ResourcesScanned)
 	}
 	for i, edge := range result.ClusterPositiveEdges {
 		if !edge.ObservedAt().Equal(observedAt) {

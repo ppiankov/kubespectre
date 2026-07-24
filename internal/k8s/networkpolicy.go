@@ -22,13 +22,23 @@ var skipNamespaces = map[string]bool{
 }
 
 func (s *NetworkPolicyScanner) Audit(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, error) {
+	// WO-25: preserve the posture-only contract; discard the scanned-object count.
+	findings, _, err := s.auditWithCount(ctx, client, cfg)
+	return findings, err
+}
+
+// WO-25: auditWithCount reports the namespaces examined for NetworkPolicy coverage.
+func (s *NetworkPolicyScanner) auditWithCount(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, int, error) {
 	var findings []Finding
 
 	namespaces, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list namespaces: %w", err)
+		return nil, 0, fmt.Errorf("list namespaces: %w", err)
 	}
 
+	// WO-30: count only namespaces actually evaluated, not every listed one, so
+	// the scanned count excludes skipped, excluded, and out-of-scope namespaces.
+	evaluated := 0
 	for _, ns := range namespaces.Items {
 		// WO-23: Enforce configured namespace and label boundaries before policy checks.
 		if cfg.Exclusions.Matches(ns.Name, ns.Labels) {
@@ -40,10 +50,11 @@ func (s *NetworkPolicyScanner) Audit(ctx context.Context, client kubernetes.Inte
 		if cfg.Namespace != "" && ns.Name != cfg.Namespace {
 			continue
 		}
+		evaluated++
 
 		policies, err := client.NetworkingV1().NetworkPolicies(ns.Name).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("list network policies in %s: %w", ns.Name, err)
+			return nil, 0, fmt.Errorf("list network policies in %s: %w", ns.Name, err)
 		}
 
 		if len(policies.Items) == 0 {
@@ -59,5 +70,6 @@ func (s *NetworkPolicyScanner) Audit(ctx context.Context, client kubernetes.Inte
 		}
 	}
 
-	return findings, nil
+	// WO-30: report the namespaces actually evaluated for network isolation.
+	return findings, evaluated, nil
 }

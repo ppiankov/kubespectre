@@ -25,6 +25,19 @@ type evidenceAuditor interface {
 	) (*serviceAccountEvidenceResult, error)
 }
 
+// WO-25: countingAuditor lets an auditor report how many primary cluster objects
+// it enumerated, so AuditAll can populate ScanResult.ResourcesScanned instead of
+// leaving total_resources_scanned pinned at zero. The count is the number of
+// objects an auditor lists to drive its findings; an object examined by several
+// auditors contributes once per auditor.
+type countingAuditor interface {
+	auditWithCount(
+		ctx context.Context,
+		client kubernetes.Interface,
+		cfg AuditConfig,
+	) ([]Finding, int, error)
+}
+
 // MultiAuditor orchestrates running multiple auditors in parallel.
 type MultiAuditor struct {
 	client      kubernetes.Interface
@@ -61,14 +74,16 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 			slog.Debug("Running auditor", "name", a.Name())
 
 			var (
-				findings      []Finding
-				positiveEdges []ClusterPositiveEdge
-				coverage      []NamespaceCoverage
-				auditErrors   []string
+				findings         []Finding
+				positiveEdges    []ClusterPositiveEdge
+				coverage         []NamespaceCoverage
+				auditErrors      []string
+				resourcesScanned int // WO-25: primary objects this auditor enumerated.
 			)
-			if evidenceSource, ok := a.(evidenceAuditor); ok {
+			switch source := a.(type) {
+			case evidenceAuditor:
 				// WO-6: merge only evidence returned by the sealed ServiceAccount collection path.
-				result, err := evidenceSource.auditWithEvidence(ctx, m.client, cfg)
+				result, err := source.auditWithEvidence(ctx, m.client, cfg)
 				if err != nil {
 					mu.Lock()
 					combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %v", a.Name(), err))
@@ -80,7 +95,19 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 				positiveEdges = result.ClusterPositiveEdges
 				coverage = result.Coverage
 				auditErrors = result.Errors
-			} else {
+				resourcesScanned = result.ResourcesScanned // WO-25: count evidence-path objects.
+			case countingAuditor:
+				// WO-25: prefer the counting variant so the auditor reports scanned objects.
+				var err error
+				findings, resourcesScanned, err = source.auditWithCount(ctx, m.client, cfg)
+				if err != nil {
+					mu.Lock()
+					combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %v", a.Name(), err))
+					mu.Unlock()
+					slog.Warn("Auditor failed", "name", a.Name(), "error", err)
+					return nil
+				}
+			default:
 				var err error
 				findings, err = a.Audit(ctx, m.client, cfg)
 				if err != nil {
@@ -97,6 +124,7 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 			// WO-6: merge positive evidence, proven scope, and collection errors atomically.
 			combined.ClusterPositiveEdges = append(combined.ClusterPositiveEdges, positiveEdges...)
 			combined.NamespaceCoverage = append(combined.NamespaceCoverage, coverage...)
+			combined.ResourcesScanned += resourcesScanned // WO-25: sum scanned objects across auditors.
 			for _, auditErr := range auditErrors {
 				combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %s", a.Name(), auditErr))
 			}
