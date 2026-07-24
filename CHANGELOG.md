@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.1] - 2026-07-25
 
 ### Fixed
 - `total_resources_scanned` in the scan summary now reflects the number of cluster objects each auditor examined instead of always reporting `0`
