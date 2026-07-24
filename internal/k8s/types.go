@@ -84,6 +84,21 @@ type Finding struct {
 	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
+// WO-24: ClusterPositiveEdgeProjection is the machine-readable edge schema.
+type ClusterPositiveEdgeProjection struct {
+	Type       ClusterPositiveEdgeType `json:"type"`
+	ObservedAt time.Time               `json:"observed_at"`
+	// WO-24: expose namespace+service account only on explicit join-key surfaces.
+	Namespace      string `json:"namespace,omitempty"`
+	ServiceAccount string `json:"service_account,omitempty"`
+	// WO-24: role ARN identifies annotation edges for IAM correlation.
+	RoleARN string `json:"role_arn,omitempty"`
+	// WO-24: workload edges include workload kind/name join keys.
+	WorkloadKind string `json:"workload_kind,omitempty"`
+	WorkloadName string `json:"workload_name,omitempty"`
+	PodName      string `json:"pod_name,omitempty"`
+}
+
 // ScanResult holds all findings from scanning a cluster.
 // WO-6: Carry positive observations and independently proven coverage in scan results.
 type ScanResult struct {
@@ -141,6 +156,50 @@ type clusterPositiveEdgeProjection struct {
 // WO-6: marshalClusterPositiveEdge deliberately excludes raw correlation identity.
 func marshalClusterPositiveEdge(edgeType ClusterPositiveEdgeType, observedAt time.Time) ([]byte, error) {
 	return json.Marshal(clusterPositiveEdgeProjection{Type: edgeType, ObservedAt: observedAt})
+}
+
+// WO-24: ProjectClusterPositiveEdge exposes a stable machine-readable projection.
+func ProjectClusterPositiveEdge(
+	edge ClusterPositiveEdge,
+	includeJoinKeys bool,
+) ClusterPositiveEdgeProjection {
+	if edge == nil {
+		return ClusterPositiveEdgeProjection{}
+	}
+	projection := ClusterPositiveEdgeProjection{
+		Type:       edge.Type(),
+		ObservedAt: edge.ObservedAt(),
+	}
+	if !includeJoinKeys {
+		return projection
+	}
+
+	projection.Namespace = edge.Namespace()
+	projection.ServiceAccount = edge.ServiceAccount()
+
+	if roleARN, ok := ServiceAccountRoleAnnotationEvidence(edge); ok {
+		projection.RoleARN = roleARN
+	}
+	if kind, name, ok := WorkloadReferenceEvidence(edge); ok {
+		projection.WorkloadKind = kind
+		projection.WorkloadName = name
+	}
+	if podName, ok := PodReferenceEvidence(edge); ok {
+		projection.PodName = podName
+	}
+	return projection
+}
+
+// WO-24: ProjectClusterPositiveEdges maps sealed edges into report projections.
+func ProjectClusterPositiveEdges(
+	edges []ClusterPositiveEdge,
+	includeJoinKeys bool,
+) []ClusterPositiveEdgeProjection {
+	projected := make([]ClusterPositiveEdgeProjection, 0, len(edges))
+	for _, edge := range edges {
+		projected = append(projected, ProjectClusterPositiveEdge(edge, includeJoinKeys))
+	}
+	return projected
 }
 
 // WO-6: these accessors expose identity only to explicit in-process correlation.

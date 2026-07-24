@@ -145,3 +145,49 @@ func TestClusterPositiveEdgesDoNotSerializeIdentityOrAbsence(t *testing.T) {
 		}
 	}
 }
+
+// WO-24: Project positive edge evidence into stable machine-readable shape.
+func TestProjectClusterPositiveEdges(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 1, 2, 3, 0, time.UTC)
+	annotation := NewServiceAccountRoleAnnotationObservedEdge(
+		"prod", "payments", "checkout-sa", "arn:aws:iam::123456789012:role/checkout", observedAt,
+	)
+	workload := NewWorkloadReferenceObservedEdge(
+		"prod", "payments", "checkout-sa", "Deployment", "checkout", observedAt,
+	)
+	pod := NewPodReferenceObservedEdge("prod", "payments", "checkout-sa", "checkout-pod", observedAt)
+
+	withoutJoinKeys := ProjectClusterPositiveEdges(
+		[]ClusterPositiveEdge{annotation, workload, pod},
+		false,
+	)
+	if len(withoutJoinKeys) != 3 {
+		t.Fatalf("edges = %#v, want 3", withoutJoinKeys)
+	}
+	for _, edge := range withoutJoinKeys {
+		if edge.ObservedAt != observedAt {
+			t.Fatalf("ObservedAt = %v, want %v", edge.ObservedAt, observedAt)
+		}
+		if edge.Namespace != "" || edge.ServiceAccount != "" || edge.RoleARN != "" || edge.WorkloadKind != "" || edge.WorkloadName != "" || edge.PodName != "" {
+			t.Fatalf("edge has join keys while disabled: %#v", edge)
+		}
+	}
+
+	withJoinKeys := ProjectClusterPositiveEdges(
+		[]ClusterPositiveEdge{annotation, workload, pod},
+		true,
+	)
+	if got := withJoinKeys[0]; got.Namespace != "payments" || got.ServiceAccount != "checkout-sa" || got.RoleARN != "arn:aws:iam::123456789012:role/checkout" || got.WorkloadKind != "" || got.WorkloadName != "" || got.PodName != "" {
+		t.Errorf("annotation projection = %#v", got)
+	}
+	if got := withJoinKeys[1]; got.WorkloadKind != "Deployment" || got.WorkloadName != "checkout" || got.PodName != "" {
+		t.Errorf("workload projection = %#v", got)
+	}
+	if got := withJoinKeys[2]; got.PodName != "checkout-pod" {
+		t.Errorf("pod projection = %#v", got)
+	}
+
+	if got := ProjectClusterPositiveEdge(nil, true); got != (ClusterPositiveEdgeProjection{}) {
+		t.Fatalf("nil edge projection = %#v, want empty", got)
+	}
+}
