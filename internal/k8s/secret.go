@@ -16,21 +16,25 @@ type SecretScanner struct{}
 func (s *SecretScanner) Name() string { return "secret" }
 
 func (s *SecretScanner) Audit(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, error) {
+	// WO-25: preserve the posture-only contract; discard the scanned-object count.
+	findings, _, err := s.auditWithCount(ctx, client, cfg)
+	return findings, err
+}
+
+// WO-25: auditWithCount reports the secrets examined for lifecycle posture.
+func (s *SecretScanner) auditWithCount(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, int, error) {
 	var findings []Finding
 
 	ns := cfg.Namespace
-	if ns == "" {
-		ns = ""
-	}
 
 	secrets, err := client.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list secrets: %w", err)
+		return nil, 0, fmt.Errorf("list secrets: %w", err)
 	}
 
 	pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list pods: %w", err)
+		return nil, 0, fmt.Errorf("list pods: %w", err)
 	}
 
 	mountedSecrets := buildMountedSecretSet(pods.Items)
@@ -83,7 +87,9 @@ func (s *SecretScanner) Audit(ctx context.Context, client kubernetes.Interface, 
 		}
 	}
 
-	return findings, nil
+	// WO-25: count every secret listed; pods are auxiliary mount context, not the
+	// scanned unit for this auditor.
+	return findings, len(secrets.Items), nil
 }
 
 func buildMountedSecretSet(pods []corev1.Pod) map[string]bool {

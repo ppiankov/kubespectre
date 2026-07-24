@@ -28,6 +28,7 @@ type serviceAccountEvidenceResult struct {
 	ClusterPositiveEdges []ClusterPositiveEdge // WO-6: positive observations only.
 	Coverage             []NamespaceCoverage   // WO-6: independently proven namespace scope.
 	Errors               []string              // WO-6: partial collection failures remain visible.
+	ResourcesScanned     int                   // WO-25: pods examined for posture, reported to the summary.
 }
 
 func (s *ServiceAccountScanner) Name() string { return "service-account" }
@@ -54,6 +55,7 @@ func (s *ServiceAccountScanner) auditWithEvidence(
 	}
 
 	result := &serviceAccountEvidenceResult{Findings: serviceAccountFindings(pods, cfg)}
+	result.ResourcesScanned = len(pods) // WO-25: pods drive service-account posture findings.
 	namespaces, discoveryErrors := namespacesForEvidence(ctx, client, cfg.Namespace, pods, cfg.Exclusions)
 	result.Errors = append(result.Errors, discoveryErrors...)
 

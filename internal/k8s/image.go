@@ -16,13 +16,20 @@ type ImageScanner struct{}
 func (s *ImageScanner) Name() string { return "image" }
 
 func (s *ImageScanner) Audit(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, error) {
+	// WO-25: preserve the posture-only contract; discard the scanned-object count.
+	findings, _, err := s.auditWithCount(ctx, client, cfg)
+	return findings, err
+}
+
+// WO-25: auditWithCount reports the pods examined for image provenance.
+func (s *ImageScanner) auditWithCount(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, int, error) {
 	var findings []Finding
 
 	ns := cfg.Namespace
 
 	pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list pods: %w", err)
+		return nil, 0, fmt.Errorf("list pods: %w", err)
 	}
 
 	seen := make(map[string]bool)
@@ -71,7 +78,8 @@ func (s *ImageScanner) Audit(ctx context.Context, client kubernetes.Interface, c
 		}
 	}
 
-	return findings, nil
+	// WO-25: count every pod listed, regardless of image findings.
+	return findings, len(pods.Items), nil
 }
 
 // hasDigest returns true if the image reference contains a digest (@sha256:...).

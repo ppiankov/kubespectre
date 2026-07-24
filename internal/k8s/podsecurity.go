@@ -16,6 +16,13 @@ type PodSecurityScanner struct{}
 func (s *PodSecurityScanner) Name() string { return "pod-security" }
 
 func (s *PodSecurityScanner) Audit(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, error) {
+	// WO-25: preserve the posture-only contract; discard the scanned-object count.
+	findings, _, err := s.auditWithCount(ctx, client, cfg)
+	return findings, err
+}
+
+// WO-25: auditWithCount reports the pods examined for pod-security posture.
+func (s *PodSecurityScanner) auditWithCount(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, int, error) {
 	var findings []Finding
 
 	listOpts := metav1.ListOptions{}
@@ -28,7 +35,7 @@ func (s *PodSecurityScanner) Audit(ctx context.Context, client kubernetes.Interf
 		pods, err = client.CoreV1().Pods("").List(ctx, listOpts)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list pods: %w", err)
+		return nil, 0, fmt.Errorf("list pods: %w", err)
 	}
 
 	for _, pod := range pods.Items {
@@ -76,5 +83,6 @@ func (s *PodSecurityScanner) Audit(ctx context.Context, client kubernetes.Interf
 		}
 	}
 
-	return findings, nil
+	// WO-25: count every pod listed, including those with no posture violation.
+	return findings, len(pods.Items), nil
 }
