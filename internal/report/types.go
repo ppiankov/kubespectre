@@ -36,10 +36,11 @@ type Target struct {
 
 // ReportConfig captures the audit configuration used.
 type ReportConfig struct {
-	Namespace                          string `json:"namespace,omitempty"`
-	StaleDays                          int    `json:"stale_days"`
-	SeverityMin                        string `json:"severity_min"`
-	IncludeClusterPositiveEdgeJoinKeys bool   `json:"include_cluster_positive_edge_join_keys"`
+	Namespace   string `json:"namespace,omitempty"`
+	StaleDays   int    `json:"stale_days"`
+	SeverityMin string `json:"severity_min"`
+	// WO-24: echo whether join keys were enabled so consumers can trust edge attribution.
+	IncludeClusterPositiveEdgeJoinKeys bool `json:"include_cluster_positive_edge_join_keys"`
 }
 
 // TextReporter generates human-readable terminal output.

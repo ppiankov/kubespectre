@@ -90,6 +90,7 @@ func TestJSONReporter(t *testing.T) {
 	assertClusterEvidenceEnvelope(t, envelope)
 }
 
+// WO-24: prove the join-key-enabled envelope carries full edge attribution.
 func TestJSONReporterWithJoinKeys(t *testing.T) {
 	var buf bytes.Buffer
 	r := &JSONReporter{Writer: &buf}
