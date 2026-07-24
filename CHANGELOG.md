@@ -4,6 +4,7 @@
 
 ### Fixed
 - `total_resources_scanned` in the scan summary now reflects the number of cluster objects each auditor examined instead of always reporting `0`
+- Network policy scans count only namespaces actually evaluated toward `total_resources_scanned`, excluding skipped, excluded, and out-of-scope namespaces
 - Cluster-edge join keys can no longer be emitted except through the gated projection path, so the `--include-edge-join-keys` default-off guarantee holds structurally
 
 ### Changed
@@ -11,6 +12,8 @@
 
 ### Documentation
 - Documented that excluded namespaces are absent from the artifact entirely (no findings, no cluster edges, no coverage entry)
+- Documented the per-auditor scan-count semantic of `total_resources_scanned`
+- README: SpectreHub links now point to `https://spectrehub.dev`; removed the retired Go Report Card badge
 
 ## [0.4.0] - 2026-07-24
 
