@@ -9,6 +9,13 @@ permissions:
   contents: write
   packages: write
 
+# WO-27: keep exactly one release run per tag. A duplicate run for the same tag
+# (for example a tag force-move) serializes behind the first instead of racing
+# it; cancel-in-progress stays false so an in-flight publish is never aborted.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test:
     name: Test before release
@@ -20,9 +27,32 @@ jobs:
           go-version: '1.24'
       - run: make test
 
+  # WO-27: fail the release BEFORE building or publishing if the tag's commit
+  # lacks its own CHANGELOG entry, so a tag can never publish without one.
+  validate-changelog:
+    name: Validate changelog entry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require CHANGELOG entry for this release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          if [ -z "${RELEASE_TAG}" ] || [ "${VERSION}" = "${RELEASE_TAG}" ]; then
+            echo "::error::Release tag must use the v<semver> format"
+            exit 1
+          fi
+          if grep -q "^## \[${VERSION}\]" CHANGELOG.md; then
+            echo "CHANGELOG entry found for ${VERSION}"
+          else
+            echo "::error::CHANGELOG missing ## [${VERSION}] entry"
+            exit 1
+          fi
+
   release:
     name: Release
-    needs: test
+    needs: [test, validate-changelog]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +63,9 @@ jobs:
         with:
           go-version: '1.24'
 
+      # WO-27: GoReleaser publishes archives + checksums + the GitHub release
+      # before its brews publisher writes the Homebrew formula, so the formula
+      # can never reference an unpublished asset sha within a single run.
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest

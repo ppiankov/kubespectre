@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `total_resources_scanned` in the scan summary now reflects the number of cluster objects each auditor examined instead of always reporting `0`
+- Cluster-edge join keys can no longer be emitted except through the gated projection path, so the `--include-edge-join-keys` default-off guarantee holds structurally
+
+### Changed
+- Release workflow hardened: per-tag run serialization, a pre-build gate that requires a `CHANGELOG.md` entry matching the release tag, and a source-contract test that pins these guards and the asset-before-formula publish order
+
+### Documentation
+- Documented that excluded namespaces are absent from the artifact entirely (no findings, no cluster edges, no coverage entry)
+
 ## [0.4.0] - 2026-07-24
 
 ### Added

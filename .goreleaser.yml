@@ -40,6 +40,9 @@ changelog:
       - "^test:"
       - "^chore:"
 
+# WO-27: brews MUST stay after archives + checksum so the Homebrew formula only
+# ever references assets GoReleaser has already built and checksummed in this run
+# (asset-before-formula). internal/release/workflow_contract_test.go pins this.
 brews:
   - repository:
       owner: ppiankov
