@@ -44,6 +44,7 @@ kubespectre version  # Print version information
 | `-o, --output` | stdout | Output file path |
 | `--severity-min` | low | Minimum severity: critical, high, medium, low |
 | `--stale-days` | 90 | Threshold for stale secrets (days) |
+| `--include-edge-join-keys` | false | Opt in to include join-key fields in `cluster_positive_edges` |
 | `--timeout` | 5m | Audit timeout |
 | `-v, --verbose` | false | Enable verbose logging |
 
@@ -74,7 +75,16 @@ syntax, and a resource is excluded when any configured selector matches.
 
 With `--format json`, the audit envelope may include two additional fields:
 
-- `cluster_positive_edges` — observed IAM correlation signals (ServiceAccount role annotations, workload references, pod references). Each edge serializes only its observation category and source-collection timestamp; raw identity is never emitted.
+- `cluster_positive_edges` — observed IAM correlation signals (ServiceAccount role annotations, workload references, pod references). By default each edge serializes only its observation category and source-collection timestamp; raw identity is never emitted.
+
+Use `--include-edge-join-keys` to opt in to non-sensitive join keys for downstream correlation:
+
+- `namespace` and `service_account` for all edges
+- `role_arn` for service-account annotation edges
+- `workload_kind` and `workload_name` for workload edges
+- `pod_name` for pod edges
+
+Join-key output is disabled by default.
 - `coverage` — per-namespace scope proof. A namespace is `complete` only when a SelfSubjectAccessReview confirms permission to list ServiceAccounts in it; otherwise it is `unknown`. Uncovered namespaces produce no absence claim.
 
 

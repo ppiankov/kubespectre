@@ -116,6 +116,7 @@ func newAuditOptionsTestCommand(t *testing.T) *cobra.Command {
 		severityMin string
 		staleDays   int
 		timeout     time.Duration
+		joinKeys    bool
 	}{}
 	namespace = ""
 	cfg = config.Config{}

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.0] - 2026-07-24
+
+### Added
+- Opt-in join-key fields on `cluster_positive_edges` for IAM correlation: `--include-edge-join-keys` (default off) adds `namespace`, `service_account`, `role_arn`, and workload/pod attribution to each edge so downstream tools can correlate cluster evidence to IAM. When disabled, edges remain sanitized to `type` and `observed_at` only.
+
 ## [0.3.0] - 2026-07-23
 
 ### Added

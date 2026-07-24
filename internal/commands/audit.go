@@ -27,6 +27,7 @@ var auditFlags struct {
 	severityMin string
 	staleDays   int
 	timeout     time.Duration
+	joinKeys    bool
 }
 
 var auditCmd = &cobra.Command{
@@ -53,6 +54,7 @@ func addAuditFlags(cmd *cobra.Command, includeStaleDays bool) {
 	cmd.Flags().StringVarP(&auditFlags.outputFile, "output", "o", "", "Output file path (default: stdout)")
 	cmd.Flags().StringVar(&auditFlags.severityMin, "severity-min", defaultSeverityMin, "Minimum severity: critical, high, medium, low")
 	cmd.Flags().DurationVar(&auditFlags.timeout, "timeout", defaultAuditTimeout, "Audit timeout")
+	cmd.Flags().BoolVar(&auditFlags.joinKeys, "include-edge-join-keys", false, "Include join keys in cluster_positive_edges output")
 	if includeStaleDays {
 		cmd.Flags().IntVar(&auditFlags.staleDays, "stale-days", defaultStaleDays, "Threshold for stale secrets (days)")
 	}
@@ -122,15 +124,19 @@ func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 			URIHash: computeTargetHash(auditCfg.Cluster, ns),
 		},
 		Config: report.ReportConfig{
-			Namespace:   ns,
-			StaleDays:   auditFlags.staleDays,
-			SeverityMin: auditFlags.severityMin,
+			Namespace:                          ns,
+			StaleDays:                          auditFlags.staleDays,
+			SeverityMin:                        auditFlags.severityMin,
+			IncludeClusterPositiveEdgeJoinKeys: auditFlags.joinKeys,
 		},
-		Findings:             analysis.Findings,
-		Summary:              analysis.Summary,
-		Errors:               analysis.Errors,
-		ClusterPositiveEdges: result.ClusterPositiveEdges, // WO-15: retain sanitized cluster observations in report envelopes.
-		NamespaceCoverage:    result.NamespaceCoverage,    // WO-15: retain proven scope for artifact consumers.
+		Findings: analysis.Findings,
+		Summary:  analysis.Summary,
+		Errors:   analysis.Errors,
+		ClusterPositiveEdges: k8s.ProjectClusterPositiveEdges( // WO-24: project edge records for reporting.
+			result.ClusterPositiveEdges,
+			auditFlags.joinKeys,
+		),
+		NamespaceCoverage: result.NamespaceCoverage, // WO-15: retain proven scope for artifact consumers.
 	}
 
 	reporter, err := selectReporter(auditFlags.format, auditFlags.outputFile)
