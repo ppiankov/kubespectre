@@ -71,6 +71,12 @@ exclude:
 Namespace exclusions are exact names. Label exclusions use Kubernetes selector
 syntax, and a resource is excluded when any configured selector matches.
 
+An excluded namespace is treated as fully out of scope: it produces **no
+findings, no `cluster_positive_edges`, and no `coverage` entry**. It is absent
+from the artifact entirely — it is not marked "excluded" and carries no scope
+proof. Consumers correlating on completeness should read an excluded namespace
+as absent evidence, not as a scanned-but-clean namespace.
+
 ### JSON output
 
 With `--format json`, the audit envelope may include two additional fields:
