@@ -93,6 +93,12 @@ Use `--include-edge-join-keys` to opt in to non-sensitive join keys for downstre
 Join-key output is disabled by default.
 - `coverage` — per-namespace scope proof. A namespace is `complete` only when a SelfSubjectAccessReview confirms permission to list ServiceAccounts in it; otherwise it is `unknown`. Uncovered namespaces produce no absence claim.
 
+The `summary.total_resources_scanned` field reports the aggregate number of
+Kubernetes objects the audit examined across all auditors. It is a scan-operation
+count, not a distinct-object count: an object inspected by more than one auditor
+(for example a pod is examined by the pod-security, image, and service-account
+auditors) is counted once per auditor.
+
 
 ## Architecture
 

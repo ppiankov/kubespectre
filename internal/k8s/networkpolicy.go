@@ -36,6 +36,9 @@ func (s *NetworkPolicyScanner) auditWithCount(ctx context.Context, client kubern
 		return nil, 0, fmt.Errorf("list namespaces: %w", err)
 	}
 
+	// WO-30: count only namespaces actually evaluated, not every listed one, so
+	// the scanned count excludes skipped, excluded, and out-of-scope namespaces.
+	evaluated := 0
 	for _, ns := range namespaces.Items {
 		// WO-23: Enforce configured namespace and label boundaries before policy checks.
 		if cfg.Exclusions.Matches(ns.Name, ns.Labels) {
@@ -47,6 +50,7 @@ func (s *NetworkPolicyScanner) auditWithCount(ctx context.Context, client kubern
 		if cfg.Namespace != "" && ns.Name != cfg.Namespace {
 			continue
 		}
+		evaluated++
 
 		policies, err := client.NetworkingV1().NetworkPolicies(ns.Name).List(ctx, metav1.ListOptions{})
 		if err != nil {
@@ -66,6 +70,6 @@ func (s *NetworkPolicyScanner) auditWithCount(ctx context.Context, client kubern
 		}
 	}
 
-	// WO-25: count every namespace listed as a scanned unit for network isolation.
-	return findings, len(namespaces.Items), nil
+	// WO-30: report the namespaces actually evaluated for network isolation.
+	return findings, evaluated, nil
 }
