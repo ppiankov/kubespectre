@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -168,8 +169,13 @@ func TestProjectClusterPositiveEdges(t *testing.T) {
 		if edge.ObservedAt != observedAt {
 			t.Fatalf("ObservedAt = %v, want %v", edge.ObservedAt, observedAt)
 		}
-		if edge.Namespace != "" || edge.ServiceAccount != "" || edge.RoleARN != "" || edge.WorkloadKind != "" || edge.WorkloadName != "" || edge.PodName != "" {
+		// WO-29: identity fields are unexported; read them in-package to confirm
+		// the disabled path leaves every join key empty.
+		if edge.namespace != "" || edge.serviceAccount != "" || edge.roleARN != "" || edge.workloadKind != "" || edge.workloadName != "" || edge.podName != "" {
 			t.Fatalf("edge has join keys while disabled: %#v", edge)
+		}
+		if edge.includeJoinKeys {
+			t.Fatalf("edge join-key gate open while disabled: %#v", edge)
 		}
 	}
 
@@ -177,17 +183,97 @@ func TestProjectClusterPositiveEdges(t *testing.T) {
 		[]ClusterPositiveEdge{annotation, workload, pod},
 		true,
 	)
-	if got := withJoinKeys[0]; got.Namespace != "payments" || got.ServiceAccount != "checkout-sa" || got.RoleARN != "arn:aws:iam::123456789012:role/checkout" || got.WorkloadKind != "" || got.WorkloadName != "" || got.PodName != "" {
+	if got := withJoinKeys[0]; got.namespace != "payments" || got.serviceAccount != "checkout-sa" || got.roleARN != "arn:aws:iam::123456789012:role/checkout" || got.workloadKind != "" || got.workloadName != "" || got.podName != "" {
 		t.Errorf("annotation projection = %#v", got)
 	}
-	if got := withJoinKeys[1]; got.WorkloadKind != "Deployment" || got.WorkloadName != "checkout" || got.PodName != "" {
+	if got := withJoinKeys[1]; got.workloadKind != "Deployment" || got.workloadName != "checkout" || got.podName != "" {
 		t.Errorf("workload projection = %#v", got)
 	}
-	if got := withJoinKeys[2]; got.PodName != "checkout-pod" {
+	if got := withJoinKeys[2]; got.podName != "checkout-pod" {
 		t.Errorf("pod projection = %#v", got)
 	}
 
 	if got := ProjectClusterPositiveEdge(nil, true); got != (ClusterPositiveEdgeProjection{}) {
 		t.Fatalf("nil edge projection = %#v, want empty", got)
+	}
+}
+
+// WO-29: identity join keys must remain unexported so no caller outside this
+// package can populate them with a struct literal and bypass the gate. Only
+// Type and ObservedAt may be exported. This is the structural guarantee the
+// flag-only WO-24 design lost.
+func TestClusterPositiveEdgeProjectionSealsIdentityFields(t *testing.T) {
+	allowedExported := map[string]bool{"Type": true, "ObservedAt": true}
+	projectionType := reflect.TypeOf(ClusterPositiveEdgeProjection{})
+	for i := 0; i < projectionType.NumField(); i++ {
+		field := projectionType.Field(i)
+		if field.IsExported() && !allowedExported[field.Name] {
+			t.Errorf("field %q is exported; identity join keys must stay unexported to preserve the join-key gate", field.Name)
+		}
+	}
+}
+
+// WO-29: a projection built the only way an external caller can (setting just
+// the exported Type/ObservedAt) must serialize no identity, proving the gate
+// cannot be bypassed by a direct struct literal.
+func TestClusterPositiveEdgeProjectionLiteralCannotLeakIdentity(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 1, 2, 3, 0, time.UTC)
+	// Only Type and ObservedAt are settable outside package k8s.
+	projection := ClusterPositiveEdgeProjection{
+		Type:       ServiceAccountRoleAnnotationObserved,
+		ObservedAt: observedAt,
+	}
+
+	encoded, err := json.Marshal(projection)
+	if err != nil {
+		t.Fatalf("marshal projection: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal projection: %v", err)
+	}
+	if len(decoded) != 2 {
+		t.Fatalf("projection serialized %d keys, want 2 (type, observed_at): %s", len(decoded), encoded)
+	}
+	for _, identityKey := range []string{
+		"namespace", "service_account", "role_arn", "workload_kind", "workload_name", "pod_name",
+	} {
+		if _, ok := decoded[identityKey]; ok {
+			t.Errorf("externally built projection leaked identity key %q: %s", identityKey, encoded)
+		}
+	}
+}
+
+// WO-29: the constructor's join-key path must still emit full attribution so the
+// opt-in WO-24 surface is unchanged for legitimate callers.
+func TestClusterPositiveEdgeProjectionConstructorEmitsJoinKeys(t *testing.T) {
+	observedAt := time.Date(2026, time.July, 23, 1, 2, 3, 0, time.UTC)
+	edge := NewServiceAccountRoleAnnotationObservedEdge(
+		"prod", "payments", "checkout-sa", "arn:aws:iam::123456789012:role/checkout", observedAt,
+	)
+
+	encoded, err := json.Marshal(ProjectClusterPositiveEdge(edge, true))
+	if err != nil {
+		t.Fatalf("marshal projection: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal projection: %v", err)
+	}
+	want := map[string]any{
+		"type":            string(ServiceAccountRoleAnnotationObserved),
+		"namespace":       "payments",
+		"service_account": "checkout-sa",
+		"role_arn":        "arn:aws:iam::123456789012:role/checkout",
+	}
+	for key, expected := range want {
+		if decoded[key] != expected {
+			t.Errorf("join-key projection[%q] = %#v, want %#v", key, decoded[key], expected)
+		}
+	}
+	if _, ok := decoded["observed_at"]; !ok {
+		t.Errorf("join-key projection missing observed_at: %s", encoded)
 	}
 }
