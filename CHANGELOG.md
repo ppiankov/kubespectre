@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.3] - 2026-07-25
 
 ### Added
 - Pod-security auditing now also flags hostPath volume mounts (`HOSTPATH_VOLUME`), containers adding dangerous Linux capabilities (`DANGEROUS_CAPABILITY`, configurable via `dangerous_capabilities`), and containers that do not explicitly disable privilege escalation (`PRIVILEGE_ESCALATION_ALLOWED`)
