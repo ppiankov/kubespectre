@@ -11,13 +11,14 @@ import (
 
 // Config holds kubespectre configuration loaded from .kubespectre.yaml.
 type Config struct {
-	Namespace         string   `yaml:"namespace"`
-	StaleDays         int      `yaml:"stale_days"`
-	SeverityMin       string   `yaml:"severity_min"`
-	Format            string   `yaml:"format"`
-	Timeout           string   `yaml:"timeout"`
-	TrustedRegistries []string `yaml:"trusted_registries"`
-	Exclude           Exclude  `yaml:"exclude"`
+	Namespace             string   `yaml:"namespace"`
+	StaleDays             int      `yaml:"stale_days"`
+	SeverityMin           string   `yaml:"severity_min"`
+	Format                string   `yaml:"format"`
+	Timeout               string   `yaml:"timeout"`
+	TrustedRegistries     []string `yaml:"trusted_registries"`
+	DangerousCapabilities []string `yaml:"dangerous_capabilities"` // WO-35: overrides the built-in dangerous-capability list.
+	Exclude               Exclude  `yaml:"exclude"`
 }
 
 // Exclude defines resources to skip during auditing.

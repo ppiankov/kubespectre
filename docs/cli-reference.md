@@ -66,6 +66,11 @@ timeout: 5m
 trusted_registries:
   - gcr.io/my-project
   - us-docker.pkg.dev/my-project
+dangerous_capabilities:
+  - NET_ADMIN
+  - SYS_ADMIN
+  - SYS_PTRACE
+  - NET_RAW
 exclude:
   namespaces:
     - kube-system
@@ -76,6 +81,19 @@ exclude:
 
 Namespace exclusions are exact names. Label exclusions use Kubernetes selector
 syntax, and a resource is excluded when any configured selector matches.
+
+### Pod security checks
+
+The pod-security auditor flags: `HOST_NETWORK` (hostNetwork), `HOST_PID`
+(hostPID), `PRIVILEGED_CONTAINER` (a container's `securityContext.privileged`
+set true), `HOSTPATH_VOLUME` (any pod volume mounting a host filesystem path),
+`DANGEROUS_CAPABILITY` (a container adding a Linux capability from the
+configured `dangerous_capabilities` list, defaulting to `NET_ADMIN`,
+`SYS_ADMIN`, `SYS_PTRACE`, `NET_RAW`), and `PRIVILEGE_ESCALATION_ALLOWED` (a
+non-privileged container that does not explicitly set
+`allowPrivilegeEscalation: false` — the Kubernetes default is `true`). A
+privileged container is not also flagged for privilege escalation, since
+privileged mode already implies it.
 
 An excluded namespace is treated as fully out of scope: it produces **no
 findings, no `cluster_positive_edges`, and no `coverage` entry**. It is absent

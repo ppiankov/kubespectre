@@ -70,6 +70,10 @@ const (
 	FindingNoImageDigest         FindingID = "NO_IMAGE_DIGEST"
 	FindingUntrustedRegistry     FindingID = "UNTRUSTED_REGISTRY"
 	FindingMissingAuditPolicy    FindingID = "MISSING_AUDIT_POLICY"
+	// WO-35: additional Pod Security Standard checks beyond host namespaces and privileged mode.
+	FindingHostPathVolume      FindingID = "HOSTPATH_VOLUME"
+	FindingDangerousCapability FindingID = "DANGEROUS_CAPABILITY"
+	FindingPrivilegeEscalation FindingID = "PRIVILEGE_ESCALATION_ALLOWED"
 )
 
 // Finding represents a single security posture issue.
@@ -159,12 +163,13 @@ type ScanResult struct {
 
 // AuditConfig holds parameters that control auditing behavior.
 type AuditConfig struct {
-	Namespace         string
-	StaleDays         int
-	SeverityMin       Severity
-	TrustedRegistries []string
-	Cluster           string
-	Exclusions        Exclusions // WO-19: immutable operator-declared scan boundary.
+	Namespace             string
+	StaleDays             int
+	SeverityMin           Severity
+	TrustedRegistries     []string
+	DangerousCapabilities []string // WO-35: added Linux capabilities PodSecurityScanner flags; empty uses the built-in default list.
+	Cluster               string
+	Exclusions            Exclusions // WO-19: immutable operator-declared scan boundary.
 }
 
 // WO-6: ClusterPositiveEdgeType is closed to the three ratified positive observations.
