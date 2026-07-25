@@ -29,6 +29,7 @@ func (s *RBACScanner) Audit(ctx context.Context, client kubernetes.Interface, cf
 // are no longer invisible.
 func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Interface, cfg AuditConfig) ([]Finding, int, error) {
 	var findings []Finding
+	scanned := 0 // WO-33: count only RBAC objects that survive exclusion filtering.
 
 	// Check ClusterRoleBindings for cluster-admin bound to non-system subjects
 	bindings, err := client.RbacV1().ClusterRoleBindings().List(ctx, metav1.ListOptions{})
@@ -41,6 +42,7 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 		if cfg.Exclusions.Matches("", crb.Labels) {
 			continue
 		}
+		scanned++ // WO-33: examined (not operator-excluded) cluster role binding.
 		if crb.RoleRef.Name == "cluster-admin" {
 			for _, subject := range crb.Subjects {
 				if isSystemSubject(subject.Name, subject.Namespace) {
@@ -69,6 +71,7 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 		if cfg.Exclusions.Matches("", role.Labels) {
 			continue
 		}
+		scanned++ // WO-33: examined (not operator-excluded) cluster role.
 		if isSystemRole(role.Name) {
 			continue
 		}
@@ -95,6 +98,7 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 		if cfg.Exclusions.Matches(role.Namespace, role.Labels) {
 			continue
 		}
+		scanned++ // WO-33: examined (not operator-excluded) namespaced role.
 		if isSystemRole(role.Name) {
 			continue
 		}
@@ -123,6 +127,7 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 		if cfg.Exclusions.Matches(rb.Namespace, rb.Labels) {
 			continue
 		}
+		scanned++ // WO-33: examined (not operator-excluded) role binding.
 		if rb.RoleRef.Kind != "ClusterRole" || !isAdminEquivalentClusterRole(rb.RoleRef.Name) {
 			continue
 		}
@@ -142,8 +147,8 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 		}
 	}
 
-	// WO-25/WO-32: count every RBAC object listed across cluster and namespace scope.
-	scanned := len(bindings.Items) + len(roles.Items) + len(nsRoles.Items) + len(roleBindings.Items)
+	// WO-33: report only RBAC objects examined post-exclusion across cluster and
+	// namespace scope; with no exclusions this equals the total listed.
 	return findings, scanned, nil
 }
 

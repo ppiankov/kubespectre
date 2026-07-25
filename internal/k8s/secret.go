@@ -45,11 +45,15 @@ func (s *SecretScanner) auditWithCount(ctx context.Context, client kubernetes.In
 	}
 	staleThreshold := time.Now().AddDate(0, 0, -staleDays)
 
+	scanned := 0 // WO-33: count only secrets that survive exclusion filtering.
 	for _, secret := range secrets.Items {
 		// WO-21: Enforce the operator boundary before producing secret findings.
 		if cfg.Exclusions.Matches(secret.Namespace, secret.Labels) {
 			continue
 		}
+		// WO-33: count secrets examined post-exclusion; the type/helm skips below
+		// are finding heuristics, not exclusions, so those secrets still count.
+		scanned++
 		// Skip service account tokens and helm secrets
 		if secret.Type == corev1.SecretTypeServiceAccountToken {
 			continue
@@ -87,9 +91,9 @@ func (s *SecretScanner) auditWithCount(ctx context.Context, client kubernetes.In
 		}
 	}
 
-	// WO-25: count every secret listed; pods are auxiliary mount context, not the
-	// scanned unit for this auditor.
-	return findings, len(secrets.Items), nil
+	// WO-33: report only secrets examined post-exclusion; pods remain auxiliary
+	// mount context, not the scanned unit for this auditor.
+	return findings, scanned, nil
 }
 
 func buildMountedSecretSet(pods []corev1.Pod) map[string]bool {

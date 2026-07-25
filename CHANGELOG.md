@@ -5,6 +5,9 @@
 ### Added
 - RBAC auditing now covers namespaced `Role` and `RoleBinding` objects in addition to cluster-scoped RBAC: wildcard-granting `Role` definitions and `RoleBinding` grants of an admin-equivalent ClusterRole (`cluster-admin`/`admin`/`edit`) to a non-system subject are now flagged
 
+### Fixed
+- `total_resources_scanned` now excludes objects suppressed by configured exclusions for the RBAC, pod-security, secret, image, and service-account auditors, consistent with the network-policy auditor's existing evaluated-only count
+
 ## [0.4.1] - 2026-07-25
 
 ### Fixed

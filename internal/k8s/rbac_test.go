@@ -266,3 +266,31 @@ func TestRBACScanner_Exclusions(t *testing.T) {
 		t.Fatalf("findings = %#v, want neighboring binding and role", findings)
 	}
 }
+
+// WO-33: the scanned count must reflect only RBAC objects that survive
+// exclusion filtering, not every object listed.
+func TestRBACScanner_CountsOnlyEvaluatedObjects(t *testing.T) {
+	exclusions, err := NewExclusions(nil, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "skip-crb", Labels: map[string]string{"scan": "skip"}}, RoleRef: rbacv1.RoleRef{Name: "view"}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "keep-crb"}, RoleRef: rbacv1.RoleRef{Name: "view"}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "skip-cr", Labels: map[string]string{"scan": "skip"}}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "keep-cr"}},
+		&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: "skip-role", Namespace: "team-a", Labels: map[string]string{"scan": "skip"}}},
+		&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: "keep-role", Namespace: "team-a"}},
+		&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "skip-rb", Namespace: "team-a", Labels: map[string]string{"scan": "skip"}}, RoleRef: rbacv1.RoleRef{Kind: "ClusterRole", Name: "view"}},
+		&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "keep-rb", Namespace: "team-a"}, RoleRef: rbacv1.RoleRef{Kind: "ClusterRole", Name: "view"}},
+	)
+
+	_, scanned, err := (&RBACScanner{}).auditWithCount(context.Background(), client, AuditConfig{Cluster: "test", Exclusions: exclusions})
+	if err != nil {
+		t.Fatalf("auditWithCount() error = %v", err)
+	}
+	// Only the 4 "keep-*" objects are evaluated; the 4 "skip-*" objects are excluded.
+	if scanned != 4 {
+		t.Fatalf("scanned = %d, want 4 (only evaluated objects, not the 8 listed)", scanned)
+	}
+}

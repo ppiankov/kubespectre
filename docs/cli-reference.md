@@ -103,7 +103,9 @@ The `summary.total_resources_scanned` field reports the aggregate number of
 Kubernetes objects the audit examined across all auditors. It is a scan-operation
 count, not a distinct-object count: an object inspected by more than one auditor
 (for example a pod is examined by the pod-security, image, and service-account
-auditors) is counted once per auditor.
+auditors) is counted once per auditor. Objects suppressed by configured
+`exclude.namespaces`/`exclude.labels` exclusions are not counted as examined by
+any auditor.
 
 
 ## Architecture

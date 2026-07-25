@@ -34,11 +34,13 @@ func (s *ImageScanner) auditWithCount(ctx context.Context, client kubernetes.Int
 
 	seen := make(map[string]bool)
 
+	scanned := 0 // WO-33: count only pods that survive exclusion filtering.
 	for _, pod := range pods.Items {
 		// WO-21: Enforce the operator boundary before producing image findings.
 		if cfg.Exclusions.Matches(pod.Namespace, pod.Labels) {
 			continue
 		}
+		scanned++
 		allContainers := append(pod.Spec.Containers, pod.Spec.InitContainers...)
 		for _, c := range allContainers {
 			image := c.Image
@@ -78,8 +80,8 @@ func (s *ImageScanner) auditWithCount(ctx context.Context, client kubernetes.Int
 		}
 	}
 
-	// WO-25: count every pod listed, regardless of image findings.
-	return findings, len(pods.Items), nil
+	// WO-33: report only pods actually examined (post-exclusion), not every pod listed.
+	return findings, scanned, nil
 }
 
 // hasDigest returns true if the image reference contains a digest (@sha256:...).
