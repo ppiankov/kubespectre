@@ -161,15 +161,20 @@ type ScanResult struct {
 	ResourcesScanned     int                   `json:"resources_scanned"`
 }
 
+// WO-35: adds DangerousCapabilities, added Linux capabilities PodSecurityScanner
+// flags; empty uses the built-in default list.
+// WO-34: adds ManagedSecretMarkers (annotation-key prefixes SecretScanner
+// recognizes as controller-managed; empty uses the built-in default list) and
+// DisableManagedSecretDownranking (opt back into uniform STALE_SECRET severity).
 // AuditConfig holds parameters that control auditing behavior.
 type AuditConfig struct {
 	Namespace                       string
 	StaleDays                       int
 	SeverityMin                     Severity
 	TrustedRegistries               []string
-	DangerousCapabilities           []string // WO-35: added Linux capabilities PodSecurityScanner flags; empty uses the built-in default list.
-	ManagedSecretMarkers            []string // WO-34: annotation-key prefixes SecretScanner recognizes as controller-managed; empty uses the built-in default list.
-	DisableManagedSecretDownranking bool     // WO-34: opt back into uniform STALE_SECRET severity regardless of managed-secret markers.
+	DangerousCapabilities           []string
+	ManagedSecretMarkers            []string
+	DisableManagedSecretDownranking bool
 	Cluster                         string
 	Exclusions                      Exclusions // WO-19: immutable operator-declared scan boundary.
 }

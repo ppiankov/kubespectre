@@ -9,6 +9,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// WO-35: adds DangerousCapabilities, overriding PodSecurityScanner's default list.
+// WO-34: adds ManagedSecretMarkers and DisableManagedSecretDownranking, controlling
+// SecretScanner's controller-managed-secret severity down-rank.
 // Config holds kubespectre configuration loaded from .kubespectre.yaml.
 type Config struct {
 	Namespace                       string   `yaml:"namespace"`
@@ -17,9 +20,9 @@ type Config struct {
 	Format                          string   `yaml:"format"`
 	Timeout                         string   `yaml:"timeout"`
 	TrustedRegistries               []string `yaml:"trusted_registries"`
-	DangerousCapabilities           []string `yaml:"dangerous_capabilities"`             // WO-35: overrides the built-in dangerous-capability list.
-	ManagedSecretMarkers            []string `yaml:"managed_secret_markers"`             // WO-34: overrides the built-in controller-managed-secret annotation markers.
-	DisableManagedSecretDownranking bool     `yaml:"disable_managed_secret_downranking"` // WO-34: opt back into uniform STALE_SECRET severity.
+	DangerousCapabilities           []string `yaml:"dangerous_capabilities"`
+	ManagedSecretMarkers            []string `yaml:"managed_secret_markers"`
+	DisableManagedSecretDownranking bool     `yaml:"disable_managed_secret_downranking"`
 	Exclude                         Exclude  `yaml:"exclude"`
 }
 

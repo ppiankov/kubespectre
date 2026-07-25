@@ -45,6 +45,8 @@ func TestPodSecurityScanner_HostNetwork(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "net-pod", Namespace: "default"},
 			Spec: corev1.PodSpec{
 				HostNetwork: true,
+				// WO-35: disable privilege escalation so this fixture stays isolated
+				// to testing HOST_NETWORK, not the new PRIVILEGE_ESCALATION_ALLOWED check.
 				Containers: []corev1.Container{{
 					Name:            "app",
 					SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: boolPtr(false)},
@@ -72,6 +74,8 @@ func TestPodSecurityScanner_HostPID(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "pid-pod", Namespace: "default"},
 			Spec: corev1.PodSpec{
 				HostPID: true,
+				// WO-35: disable privilege escalation so this fixture stays isolated
+				// to testing HOST_PID, not the new PRIVILEGE_ESCALATION_ALLOWED check.
 				Containers: []corev1.Container{{
 					Name:            "app",
 					SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: boolPtr(false)},
@@ -135,6 +139,8 @@ func TestPodSecurityScanner_Clean(t *testing.T) {
 				Containers: []corev1.Container{
 					{
 						Name: "app",
+						// WO-35: explicitly disable privilege escalation too, so this
+						// fixture is clean against all pod-security checks, not just privileged.
 						SecurityContext: &corev1.SecurityContext{
 							Privileged:               boolPtr(false),
 							AllowPrivilegeEscalation: boolPtr(false),

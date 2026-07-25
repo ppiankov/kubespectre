@@ -9,6 +9,7 @@ import (
 
 func TestLoadYAML(t *testing.T) {
 	dir := t.TempDir()
+	// WO-35: pins dangerous_capabilities YAML parsing into Config.DangerousCapabilities.
 	content := `stale_days: 120
 severity_min: high
 format: json
@@ -49,6 +50,7 @@ exclude:
 	if len(cfg.TrustedRegistries) != 2 {
 		t.Errorf("TrustedRegistries len = %d, want 2", len(cfg.TrustedRegistries))
 	}
+	// WO-35: pins DangerousCapabilities parsing from the config file.
 	if len(cfg.DangerousCapabilities) != 2 {
 		t.Errorf("DangerousCapabilities len = %d, want 2", len(cfg.DangerousCapabilities))
 	}
