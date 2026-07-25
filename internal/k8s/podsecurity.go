@@ -38,11 +38,13 @@ func (s *PodSecurityScanner) auditWithCount(ctx context.Context, client kubernet
 		return nil, 0, fmt.Errorf("list pods: %w", err)
 	}
 
+	scanned := 0 // WO-33: count only pods that survive exclusion filtering.
 	for _, pod := range pods.Items {
 		// WO-21: Enforce the operator boundary before producing pod findings.
 		if cfg.Exclusions.Matches(pod.Namespace, pod.Labels) {
 			continue
 		}
+		scanned++
 		if pod.Spec.HostNetwork {
 			findings = append(findings, Finding{
 				ID:           FindingHostNetwork,
@@ -83,6 +85,6 @@ func (s *PodSecurityScanner) auditWithCount(ctx context.Context, client kubernet
 		}
 	}
 
-	// WO-25: count every pod listed, including those with no posture violation.
-	return findings, len(pods.Items), nil
+	// WO-33: report only pods actually examined (post-exclusion), not every pod listed.
+	return findings, scanned, nil
 }

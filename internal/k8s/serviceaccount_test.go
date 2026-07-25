@@ -481,6 +481,32 @@ func TestServiceAccountScannerAppliesExclusionsToEvidence(t *testing.T) {
 	}
 }
 
+// WO-33: ResourcesScanned must reflect only pods that survive exclusion
+// filtering, not every pod listed.
+func TestServiceAccountScannerCountsOnlyEvaluatedPods(t *testing.T) {
+	exclusions, err := NewExclusions([]string{"excluded"}, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	client := fake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "namespace-skip", Namespace: "excluded"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "label-skip", Namespace: "default", Labels: map[string]string{"scan": "skip"}}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "keep", Namespace: "default"}},
+	)
+	allowServiceAccountList(client, true)
+
+	result, err := (&ServiceAccountScanner{}).auditWithEvidence(context.Background(), client, AuditConfig{
+		Cluster:    "test",
+		Exclusions: exclusions,
+	})
+	if err != nil {
+		t.Fatalf("auditWithEvidence() error = %v", err)
+	}
+	if result.ResourcesScanned != 1 {
+		t.Fatalf("ResourcesScanned = %d, want 1 (only the evaluated pod, not the 3 listed)", result.ResourcesScanned)
+	}
+}
+
 // WO-26: Pin that an excluded namespace yields neither positive cluster edges
 // nor a coverage entry — it is absent from the artifact, not marked "excluded".
 // A "kept" namespace with an identical shape acts as the control proving the

@@ -258,3 +258,26 @@ func TestSecretScanner_Exclusions(t *testing.T) {
 		t.Fatalf("findings = %#v, want only neighboring secret", findings)
 	}
 }
+
+// WO-33: the scanned count must reflect only secrets that survive exclusion
+// filtering, not every secret listed.
+func TestSecretScanner_CountsOnlyEvaluatedSecrets(t *testing.T) {
+	exclusions, err := NewExclusions([]string{"excluded"}, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	recent := metav1.NewTime(time.Now())
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "namespace-skip", Namespace: "excluded", CreationTimestamp: recent}, Type: corev1.SecretTypeOpaque},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "label-skip", Namespace: "default", Labels: map[string]string{"scan": "skip"}, CreationTimestamp: recent}, Type: corev1.SecretTypeOpaque},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "keep", Namespace: "default", CreationTimestamp: recent}, Type: corev1.SecretTypeOpaque},
+	)
+
+	_, scanned, err := (&SecretScanner{}).auditWithCount(context.Background(), client, AuditConfig{Cluster: "test", StaleDays: 90, Exclusions: exclusions})
+	if err != nil {
+		t.Fatalf("auditWithCount() error = %v", err)
+	}
+	if scanned != 1 {
+		t.Fatalf("scanned = %d, want 1 (only the evaluated secret, not the 3 listed)", scanned)
+	}
+}

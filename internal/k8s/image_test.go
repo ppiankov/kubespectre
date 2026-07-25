@@ -244,3 +244,25 @@ func TestImageScanner_Exclusions(t *testing.T) {
 		t.Fatalf("findings = %#v, want only neighboring pod image", findings)
 	}
 }
+
+// WO-33: the scanned count must reflect only pods that survive exclusion
+// filtering, not every pod listed.
+func TestImageScanner_CountsOnlyEvaluatedPods(t *testing.T) {
+	exclusions, err := NewExclusions([]string{"excluded"}, []string{"scan=skip"})
+	if err != nil {
+		t.Fatalf("NewExclusions() error = %v", err)
+	}
+	client := fake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "namespace-skip", Namespace: "excluded"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}}}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "label-skip", Namespace: "default", Labels: map[string]string{"scan": "skip"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}}}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "keep", Namespace: "default"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "nginx:latest"}}}},
+	)
+
+	_, scanned, err := (&ImageScanner{}).auditWithCount(context.Background(), client, AuditConfig{Cluster: "test", Exclusions: exclusions})
+	if err != nil {
+		t.Fatalf("auditWithCount() error = %v", err)
+	}
+	if scanned != 1 {
+		t.Fatalf("scanned = %d, want 1 (only the evaluated pod, not the 3 listed)", scanned)
+	}
+}

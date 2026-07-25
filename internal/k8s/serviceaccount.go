@@ -40,7 +40,8 @@ func (s *ServiceAccountScanner) Audit(ctx context.Context, client kubernetes.Int
 	if err != nil {
 		return nil, err
 	}
-	return serviceAccountFindings(pods, cfg), nil
+	findings, _ := serviceAccountFindings(pods, cfg)
+	return findings, nil
 }
 
 // WO-6: auditWithEvidence keeps positive evidence separate from existing posture findings.
@@ -54,8 +55,9 @@ func (s *ServiceAccountScanner) auditWithEvidence(
 		return nil, err
 	}
 
-	result := &serviceAccountEvidenceResult{Findings: serviceAccountFindings(pods, cfg)}
-	result.ResourcesScanned = len(pods) // WO-25: pods drive service-account posture findings.
+	findings, scanned := serviceAccountFindings(pods, cfg)
+	result := &serviceAccountEvidenceResult{Findings: findings}
+	result.ResourcesScanned = scanned // WO-33: report only pods examined post-exclusion.
 	namespaces, discoveryErrors := namespacesForEvidence(ctx, client, cfg.Namespace, pods, cfg.Exclusions)
 	result.Errors = append(result.Errors, discoveryErrors...)
 
@@ -144,14 +146,16 @@ func (s *ServiceAccountScanner) nowUTC() time.Time {
 }
 
 // WO-6: serviceAccountFindings preserves the established posture plane during evidence collection.
-func serviceAccountFindings(pods []corev1.Pod, cfg AuditConfig) []Finding {
+func serviceAccountFindings(pods []corev1.Pod, cfg AuditConfig) ([]Finding, int) {
 	var findings []Finding
+	scanned := 0 // WO-33: count only pods that survive exclusion filtering.
 
 	for _, pod := range pods {
 		// WO-22: Enforce exclusions before producing ServiceAccount posture findings.
 		if cfg.Exclusions.Matches(pod.Namespace, pod.Labels) {
 			continue
 		}
+		scanned++
 		saName := resolvedServiceAccountName(pod.Spec.ServiceAccountName)
 
 		if saName == "default" {
@@ -179,7 +183,7 @@ func serviceAccountFindings(pods []corev1.Pod, cfg AuditConfig) []Finding {
 		}
 	}
 
-	return findings
+	return findings, scanned
 }
 
 // WO-6: namespacesForEvidence discovers candidates but never asserts their completeness.
