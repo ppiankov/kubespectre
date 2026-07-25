@@ -99,17 +99,19 @@ non-privileged container that does not explicitly set
 privileged container is not also flagged for privilege escalation, since
 privileged mode already implies it.
 
-### Stale secret severity for controller-managed secrets
+### Secret severity for controller-managed secrets
 
-A `STALE_SECRET` finding on a secret carrying an annotation key prefixed by a
-configured `managed_secret_markers` entry (defaulting to `cert-manager.io/` and
-`external-secrets.io/`) is reported at `medium` severity instead of `high`, and
-its message notes the recognized marker — age alone does not indicate an
-unrotated or forgotten credential for a secret a controller actively owns. The
-finding is never suppressed, only down-ranked. Set
-`disable_managed_secret_downranking: true` to opt back into uniform `high`
-severity regardless of markers, or set `managed_secret_markers` to your own
-list to recognize other controllers.
+A `STALE_SECRET` or `UNUSED_SECRET_MOUNT` finding on a secret carrying an
+annotation key prefixed by a configured `managed_secret_markers` entry
+(defaulting to `cert-manager.io/` and `external-secrets.io/`) is reported at
+`medium` severity instead of `high`, and its message notes the recognized
+marker: age alone does not indicate an unrotated or forgotten credential for a
+secret a controller actively owns, and lack of a pod mount does not mean
+unused for a secret consumed via a non-pod-mount path (Ingress `tls.secretName`,
+webhook `caBundle` injection). Neither finding is ever suppressed, only
+down-ranked. Set `disable_managed_secret_downranking: true` to opt back into
+uniform `high` severity for both finding types regardless of markers, or set
+`managed_secret_markers` to your own list to recognize other controllers.
 
 An excluded namespace is treated as fully out of scope: it produces **no
 findings, no `cluster_positive_edges`, and no `coverage` entry**. It is absent

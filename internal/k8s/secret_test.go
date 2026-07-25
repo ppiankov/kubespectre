@@ -407,3 +407,70 @@ func TestSecretScanner_ManagedSecretMarkersConfigured(t *testing.T) {
 		t.Fatalf("findings = %#v, want 1 STALE_SECRET at medium (acme.internal/ configured)", findings)
 	}
 }
+
+// WO-37: an unused secret carrying a recognized managed-secret marker is
+// down-ranked to medium; an unmanaged unused secret stays high.
+func TestSecretScanner_ManagedUnusedSecretDownranked(t *testing.T) {
+	recentTime := metav1.NewTime(time.Now().AddDate(0, 0, -1))
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "webhook-ca", Namespace: "cert-manager", CreationTimestamp: recentTime,
+				Annotations: map[string]string{"cert-manager.io/allow-direct-injection": "true"},
+			},
+			Type: corev1.SecretTypeOpaque,
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "forgotten", Namespace: "default", CreationTimestamp: recentTime},
+			Type:       corev1.SecretTypeOpaque,
+		},
+	)
+
+	findings, err := (&SecretScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test", StaleDays: 90})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("got %d findings, want 2 UNUSED_SECRET_MOUNT: %#v", len(findings), findings)
+	}
+	bySecret := map[string]Finding{}
+	for _, f := range findings {
+		bySecret[f.ResourceID] = f
+	}
+	if bySecret["webhook-ca"].Severity != SeverityMedium {
+		t.Errorf("webhook-ca severity = %q, want medium", bySecret["webhook-ca"].Severity)
+	}
+	if bySecret["webhook-ca"].Metadata["managed"] != true {
+		t.Errorf("webhook-ca metadata[managed] = %v, want true", bySecret["webhook-ca"].Metadata["managed"])
+	}
+	if bySecret["forgotten"].Severity != SeverityHigh {
+		t.Errorf("forgotten severity = %q, want high (unaffected, no managed marker)", bySecret["forgotten"].Severity)
+	}
+}
+
+// WO-37: DisableManagedSecretDownranking (from WO-34) also suppresses the
+// UNUSED_SECRET_MOUNT down-rank -- one shared switch for both finding types.
+func TestSecretScanner_ManagedUnusedSecretDownrankingDisabled(t *testing.T) {
+	recentTime := metav1.NewTime(time.Now().AddDate(0, 0, -1))
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "webhook-ca", Namespace: "cert-manager", CreationTimestamp: recentTime,
+				Annotations: map[string]string{"cert-manager.io/allow-direct-injection": "true"},
+			},
+			Type: corev1.SecretTypeOpaque,
+		},
+	)
+
+	findings, err := (&SecretScanner{}).Audit(context.Background(), client, AuditConfig{
+		Cluster:                         "test",
+		StaleDays:                       90,
+		DisableManagedSecretDownranking: true,
+	})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].Severity != SeverityHigh {
+		t.Fatalf("findings = %#v, want 1 UNUSED_SECRET_MOUNT at high (downranking disabled)", findings)
+	}
+}
