@@ -76,6 +76,32 @@ const (
 	FindingPrivilegeEscalation FindingID = "PRIVILEGE_ESCALATION_ALLOWED"
 )
 
+// WO-38: AllFindingIDs is the canonical registry of every FindingID constant.
+// Reporters that maintain a per-ID lookup (e.g. SARIF's rule declarations)
+// assert their coverage against this list so a new finding ID added above
+// without updating those reporters fails a test instead of silently
+// producing incomplete output. Add new constants to this list in the same
+// change that adds them above.
+var AllFindingIDs = []FindingID{
+	FindingWildcardRBAC,
+	FindingClusterAdminBinding,
+	FindingPrivilegedContainer,
+	FindingHostNetwork,
+	FindingHostPID,
+	FindingMissingNetworkPolicy,
+	FindingUnencryptedSecrets,
+	FindingUnusedSecretMount,
+	FindingStaleSecret,
+	FindingDefaultServiceAccount,
+	FindingAutomountToken,
+	FindingNoImageDigest,
+	FindingUntrustedRegistry,
+	FindingMissingAuditPolicy,
+	FindingHostPathVolume,
+	FindingDangerousCapability,
+	FindingPrivilegeEscalation,
+}
+
 // Finding represents a single security posture issue.
 type Finding struct {
 	ID           FindingID      `json:"id"`
