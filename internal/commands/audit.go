@@ -95,13 +95,15 @@ func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 	severityMin := k8s.ParseSeverity(auditFlags.severityMin)
 
 	auditCfg := k8s.AuditConfig{
-		Namespace:             ns,
-		StaleDays:             auditFlags.staleDays,
-		SeverityMin:           severityMin,
-		TrustedRegistries:     cfg.TrustedRegistries,
-		DangerousCapabilities: cfg.DangerousCapabilities,
-		Cluster:               resolveClusterName(),
-		Exclusions:            exclusions, // WO-20: carry the validated operator scan boundary.
+		Namespace:                       ns,
+		StaleDays:                       auditFlags.staleDays,
+		SeverityMin:                     severityMin,
+		TrustedRegistries:               cfg.TrustedRegistries,
+		DangerousCapabilities:           cfg.DangerousCapabilities,
+		ManagedSecretMarkers:            cfg.ManagedSecretMarkers,
+		DisableManagedSecretDownranking: cfg.DisableManagedSecretDownranking,
+		Cluster:                         resolveClusterName(),
+		Exclusions:                      exclusions, // WO-20: carry the validated operator scan boundary.
 	}
 
 	slog.Info("Starting audit", "namespace", ns, "severity-min", auditFlags.severityMin)
