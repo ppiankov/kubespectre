@@ -66,6 +66,15 @@ timeout: 5m
 trusted_registries:
   - gcr.io/my-project
   - us-docker.pkg.dev/my-project
+dangerous_capabilities:
+  - NET_ADMIN
+  - SYS_ADMIN
+  - SYS_PTRACE
+  - NET_RAW
+managed_secret_markers:
+  - cert-manager.io/
+  - external-secrets.io/
+disable_managed_secret_downranking: false
 exclude:
   namespaces:
     - kube-system
@@ -76,6 +85,33 @@ exclude:
 
 Namespace exclusions are exact names. Label exclusions use Kubernetes selector
 syntax, and a resource is excluded when any configured selector matches.
+
+### Pod security checks
+
+The pod-security auditor flags: `HOST_NETWORK` (hostNetwork), `HOST_PID`
+(hostPID), `PRIVILEGED_CONTAINER` (a container's `securityContext.privileged`
+set true), `HOSTPATH_VOLUME` (any pod volume mounting a host filesystem path),
+`DANGEROUS_CAPABILITY` (a container adding a Linux capability from the
+configured `dangerous_capabilities` list, defaulting to `NET_ADMIN`,
+`SYS_ADMIN`, `SYS_PTRACE`, `NET_RAW`), and `PRIVILEGE_ESCALATION_ALLOWED` (a
+non-privileged container that does not explicitly set
+`allowPrivilegeEscalation: false` — the Kubernetes default is `true`). A
+privileged container is not also flagged for privilege escalation, since
+privileged mode already implies it.
+
+### Secret severity for controller-managed secrets
+
+A `STALE_SECRET` or `UNUSED_SECRET_MOUNT` finding on a secret carrying an
+annotation key prefixed by a configured `managed_secret_markers` entry
+(defaulting to `cert-manager.io/` and `external-secrets.io/`) is reported at
+`medium` severity instead of `high`, and its message notes the recognized
+marker: age alone does not indicate an unrotated or forgotten credential for a
+secret a controller actively owns, and lack of a pod mount does not mean
+unused for a secret consumed via a non-pod-mount path (Ingress `tls.secretName`,
+webhook `caBundle` injection). Neither finding is ever suppressed, only
+down-ranked. Set `disable_managed_secret_downranking: true` to opt back into
+uniform `high` severity for both finding types regardless of markers, or set
+`managed_secret_markers` to your own list to recognize other controllers.
 
 An excluded namespace is treated as fully out of scope: it produces **no
 findings, no `cluster_positive_edges`, and no `coverage` entry**. It is absent

@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Pod-security auditing now also flags hostPath volume mounts (`HOSTPATH_VOLUME`), containers adding dangerous Linux capabilities (`DANGEROUS_CAPABILITY`, configurable via `dangerous_capabilities`), and containers that do not explicitly disable privilege escalation (`PRIVILEGE_ESCALATION_ALLOWED`)
+
+### Changed
+- `STALE_SECRET` and `UNUSED_SECRET_MOUNT` findings on secrets carrying a recognized controller-managed annotation marker (defaulting to `cert-manager.io/` and `external-secrets.io/`) are now reported at `medium` severity instead of `high`, configurable via `managed_secret_markers` and `disable_managed_secret_downranking`
+
 ## [0.4.2] - 2026-07-25
 
 ### Added
