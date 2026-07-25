@@ -145,5 +145,10 @@ func buildSARIFRules() []sarifRule {
 		{ID: string(k8s.FindingNoImageDigest), ShortDescription: sarifMessage{Text: "Image without digest pinning"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},
 		{ID: string(k8s.FindingUntrustedRegistry), ShortDescription: sarifMessage{Text: "Image from untrusted registry"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},
 		{ID: string(k8s.FindingMissingAuditPolicy), ShortDescription: sarifMessage{Text: "Missing audit policy"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
+		// WO-38: these three were added by WO-35 but never registered here, so
+		// results referenced them via ruleId with no matching driver.rules entry.
+		{ID: string(k8s.FindingHostPathVolume), ShortDescription: sarifMessage{Text: "hostPath volume mount"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
+		{ID: string(k8s.FindingDangerousCapability), ShortDescription: sarifMessage{Text: "Dangerous Linux capability added"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
+		{ID: string(k8s.FindingPrivilegeEscalation), ShortDescription: sarifMessage{Text: "Privilege escalation allowed"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},
 	}
 }

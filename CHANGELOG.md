@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- SARIF output now declares rules for `HOSTPATH_VOLUME`, `DANGEROUS_CAPABILITY`, and `PRIVILEGE_ESCALATION_ALLOWED`, which previously appeared in results with no matching rule declaration
+
 ## [0.4.3] - 2026-07-25
 
 ### Added

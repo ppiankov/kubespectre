@@ -45,8 +45,27 @@ func TestSARIFReporter(t *testing.T) {
 	tool := run["tool"].(map[string]any)
 	driver := tool["driver"].(map[string]any)
 	rules, ok := driver["rules"].([]any)
-	if !ok || len(rules) != 14 {
-		t.Errorf("rules count = %d, want 14", len(rules))
+	// WO-38: assert against k8s.AllFindingIDs, not a magic count that must be
+	// manually bumped and can silently drift when a new FindingID is added.
+	if !ok || len(rules) != len(k8s.AllFindingIDs) {
+		t.Errorf("rules count = %d, want %d (len(k8s.AllFindingIDs))", len(rules), len(k8s.AllFindingIDs))
+	}
+}
+
+// WO-38: every k8s.FindingID constant must have a corresponding SARIF rule
+// declaration, so a new finding ID added without updating buildSARIFRules()
+// fails this test instead of silently producing a result with no matching
+// driver.rules entry.
+func TestSARIFRulesCoverAllFindingIDs(t *testing.T) {
+	rules := buildSARIFRules()
+	declared := make(map[string]bool, len(rules))
+	for _, r := range rules {
+		declared[r.ID] = true
+	}
+	for _, id := range k8s.AllFindingIDs {
+		if !declared[string(id)] {
+			t.Errorf("FindingID %q has no buildSARIFRules() entry", id)
+		}
 	}
 }
 
