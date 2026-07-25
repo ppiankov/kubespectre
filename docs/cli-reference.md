@@ -33,6 +33,12 @@ kubespectre init     # Generate sample config and RBAC policy
 kubespectre version  # Print version information
 ```
 
+RBAC auditing covers both cluster-scoped and namespaced RBAC: it flags
+`ClusterRole` **and** namespaced `Role` definitions that grant wildcard verbs or
+resources, and `ClusterRoleBinding` **and** namespaced `RoleBinding` grants of an
+admin-equivalent ClusterRole (`cluster-admin`/`admin`/`edit`) to a non-system
+subject.
+
 ### Flags
 
 | Flag | Default | Description |

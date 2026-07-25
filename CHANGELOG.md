@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- RBAC auditing now covers namespaced `Role` and `RoleBinding` objects in addition to cluster-scoped RBAC: wildcard-granting `Role` definitions and `RoleBinding` grants of an admin-equivalent ClusterRole (`cluster-admin`/`admin`/`edit`) to a non-system subject are now flagged
+
 ## [0.4.1] - 2026-07-25
 
 ### Fixed
