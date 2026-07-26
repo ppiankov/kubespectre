@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- New PersistentVolume data-retention auditor: flags a `Released`-phase volume with `reclaimPolicy: Retain` older than `--stale-days` as `STALE_RELEASED_VOLUME` (`medium` severity) -- the underlying cloud volume is not deleted and may still hold the former workload's data
+
 ## [0.4.4] - 2026-07-25
 
 ### Fixed

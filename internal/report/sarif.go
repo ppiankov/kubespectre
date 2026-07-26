@@ -150,5 +150,7 @@ func buildSARIFRules() []sarifRule {
 		{ID: string(k8s.FindingHostPathVolume), ShortDescription: sarifMessage{Text: "hostPath volume mount"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
 		{ID: string(k8s.FindingDangerousCapability), ShortDescription: sarifMessage{Text: "Dangerous Linux capability added"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
 		{ID: string(k8s.FindingPrivilegeEscalation), ShortDescription: sarifMessage{Text: "Privilege escalation allowed"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},
+		// WO-40: stale Released-phase PersistentVolume data-retention finding.
+		{ID: string(k8s.FindingStaleReleasedVolume), ShortDescription: sarifMessage{Text: "Stale released PersistentVolume"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},
 	}
 }

@@ -150,6 +150,7 @@ func AllAuditors() []Auditor {
 		&ServiceAccountScanner{},
 		&ImageScanner{},
 		&AuditLogScanner{},
+		&PersistentVolumeScanner{}, // WO-40: stale Released-phase volume retention.
 	}
 }
 
