@@ -2,11 +2,16 @@ package k8s
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestRBACScanner_ClusterAdminBinding(t *testing.T) {
@@ -292,5 +297,131 @@ func TestRBACScanner_CountsOnlyEvaluatedObjects(t *testing.T) {
 	// Only the 4 "keep-*" objects are evaluated; the 4 "skip-*" objects are excluded.
 	if scanned != 4 {
 		t.Fatalf("scanned = %d, want 4 (only evaluated objects, not the 8 listed)", scanned)
+	}
+}
+
+// WO-41: a ServiceAccount subject that exists in the cluster gets
+// subject_liveness=confirmed_exists, and the message is unchanged from today's.
+func TestRBACScanner_SubjectLivenessConfirmedExists(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "live-binding"},
+			RoleRef:    rbacv1.RoleRef{Name: "cluster-admin"},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "deploy-bot", Namespace: "default"}},
+		},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "deploy-bot", Namespace: "default"}},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	f := findings[0]
+	if f.Severity != SeverityCritical {
+		t.Errorf("severity = %q, want %q (must never change with liveness)", f.Severity, SeverityCritical)
+	}
+	if f.Metadata["subject_kind"] != "ServiceAccount" || f.Metadata["subject_liveness"] != SubjectLivenessConfirmedExists {
+		t.Errorf("metadata = %+v, want subject_kind=ServiceAccount subject_liveness=confirmed_exists", f.Metadata)
+	}
+	if f.Message != "cluster-admin bound to ServiceAccount default/deploy-bot" {
+		t.Errorf("message = %q, want unchanged base message for confirmed_exists", f.Message)
+	}
+}
+
+// WO-41: a ServiceAccount subject referenced but never created gets
+// subject_liveness=confirmed_absent, severity stays critical, and the message
+// gains the dangling-binding sentence.
+func TestRBACScanner_SubjectLivenessConfirmedAbsent(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "dangling-binding"},
+			RoleRef:    rbacv1.RoleRef{Name: "cluster-admin"},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "admin-user", Namespace: "kubernetes-dashboard"}},
+		},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	f := findings[0]
+	if f.Severity != SeverityCritical {
+		t.Errorf("severity = %q, want %q (dangling status must never down-rank severity)", f.Severity, SeverityCritical)
+	}
+	if f.Metadata["subject_liveness"] != SubjectLivenessConfirmedAbsent {
+		t.Errorf("subject_liveness = %v, want confirmed_absent", f.Metadata["subject_liveness"])
+	}
+	if !strings.Contains(f.Message, "safe to revoke immediately") {
+		t.Errorf("message = %q, want it to include the dangling-binding sentence", f.Message)
+	}
+}
+
+// WO-41: User and Group subjects are structurally not checkable -- Kubernetes
+// has no API for either -- and must be reported not_checkable, never omitted
+// or defaulted to confirmed_exists.
+func TestRBACScanner_SubjectLivenessNotCheckableForUserAndGroup(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "user-binding"},
+			RoleRef:    rbacv1.RoleRef{Name: "cluster-admin"},
+			Subjects:   []rbacv1.Subject{{Kind: "User", Name: "alice"}},
+		},
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "group-binding"},
+			RoleRef:    rbacv1.RoleRef{Name: "cluster-admin"},
+			Subjects:   []rbacv1.Subject{{Kind: "Group", Name: "developers"}},
+		},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("got %d findings, want 2", len(findings))
+	}
+	for _, f := range findings {
+		if f.Metadata["subject_liveness"] != SubjectLivenessNotCheckable {
+			t.Errorf("subject %v: subject_liveness = %v, want not_checkable", f.Metadata["subject_kind"], f.Metadata["subject_liveness"])
+		}
+	}
+}
+
+// WO-41: a non-404 Get error (RBAC denial, timeout, etc.) must report
+// check_failed -- never confirmed_absent -- since absence was never proven.
+func TestRBACScanner_SubjectLivenessCheckFailed(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "unreadable-binding"},
+			RoleRef:    rbacv1.RoleRef{Name: "cluster-admin"},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "deploy-bot", Namespace: "default"}},
+		},
+	)
+	client.PrependReactor("get", "serviceaccounts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("connection refused")
+	})
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	f := findings[0]
+	if f.Metadata["subject_liveness"] != SubjectLivenessCheckFailed {
+		t.Errorf("subject_liveness = %v, want check_failed", f.Metadata["subject_liveness"])
+	}
+	if f.Severity != SeverityCritical {
+		t.Errorf("severity = %q, want %q", f.Severity, SeverityCritical)
+	}
+	if strings.Contains(f.Message, "safe to revoke") {
+		t.Errorf("message = %q, must not claim dangling status on check_failed", f.Message)
 	}
 }

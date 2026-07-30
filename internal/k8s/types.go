@@ -76,6 +76,8 @@ const (
 	FindingPrivilegeEscalation FindingID = "PRIVILEGE_ESCALATION_ALLOWED"
 	// WO-40: PersistentVolume data-retention check.
 	FindingStaleReleasedVolume FindingID = "STALE_RELEASED_VOLUME"
+	// WO-43: opt-in convention lint, decoupled from CNI capability/enforcement.
+	FindingDefaultDenyBaselineNotDetected FindingID = "DEFAULT_DENY_BASELINE_NOT_DETECTED"
 )
 
 // WO-38: AllFindingIDs is the canonical registry of every FindingID constant.
@@ -103,6 +105,7 @@ var AllFindingIDs = []FindingID{
 	FindingDangerousCapability,
 	FindingPrivilegeEscalation,
 	FindingStaleReleasedVolume,
+	FindingDefaultDenyBaselineNotDetected,
 }
 
 // Finding represents a single security posture issue.
@@ -188,6 +191,9 @@ type ScanResult struct {
 	ClusterPositiveEdges []ClusterPositiveEdge `json:"cluster_positive_edges,omitempty"` // WO-6: serialize only each edge's sanitized projection.
 	NamespaceCoverage    []NamespaceCoverage   `json:"coverage,omitempty"`               // WO-6: keep completeness separate from positive observations.
 	ResourcesScanned     int                   `json:"resources_scanned"`
+	// WO-42@v2: additive, structurally separate from Findings -- see the STRONG
+	// SEPARATION INVARIANT test. Never touches finding existence/severity/message.
+	EnvironmentObservations *EnvironmentObservations `json:"environment_observations,omitempty"`
 }
 
 // WO-35: adds DangerousCapabilities, added Linux capabilities PodSecurityScanner
@@ -206,6 +212,8 @@ type AuditConfig struct {
 	DisableManagedSecretDownranking bool
 	Cluster                         string
 	Exclusions                      Exclusions // WO-19: immutable operator-declared scan boundary.
+	// WO-43: opt-in, disabled by default; decoupled from CNI capability state.
+	CheckDefaultDenyBaseline bool
 }
 
 // WO-6: ClusterPositiveEdgeType is closed to the three ratified positive observations.

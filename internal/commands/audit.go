@@ -22,12 +22,13 @@ const (
 )
 
 var auditFlags struct {
-	format      string
-	outputFile  string
-	severityMin string
-	staleDays   int
-	timeout     time.Duration
-	joinKeys    bool
+	format                   string
+	outputFile               string
+	severityMin              string
+	staleDays                int
+	timeout                  time.Duration
+	joinKeys                 bool
+	checkDefaultDenyBaseline bool
 }
 
 var auditCmd = &cobra.Command{
@@ -55,6 +56,8 @@ func addAuditFlags(cmd *cobra.Command, includeStaleDays bool) {
 	cmd.Flags().StringVar(&auditFlags.severityMin, "severity-min", defaultSeverityMin, "Minimum severity: critical, high, medium, low")
 	cmd.Flags().DurationVar(&auditFlags.timeout, "timeout", defaultAuditTimeout, "Audit timeout")
 	cmd.Flags().BoolVar(&auditFlags.joinKeys, "include-edge-join-keys", false, "Include join keys in cluster_positive_edges output")
+	// WO-43: opt-in, disabled by default -- convention lint, not a vulnerability check.
+	cmd.Flags().BoolVar(&auditFlags.checkDefaultDenyBaseline, "check-default-deny-baseline", false, "Flag namespaces whose NetworkPolicies do not match a default-deny baseline shape (convention lint, no severity)")
 	if includeStaleDays {
 		cmd.Flags().IntVar(&auditFlags.staleDays, "stale-days", defaultStaleDays, "Threshold for stale secrets (days)")
 	}
@@ -104,6 +107,7 @@ func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 		DisableManagedSecretDownranking: cfg.DisableManagedSecretDownranking,
 		Cluster:                         resolveClusterName(),
 		Exclusions:                      exclusions, // WO-20: carry the validated operator scan boundary.
+		CheckDefaultDenyBaseline:        auditFlags.checkDefaultDenyBaseline,
 	}
 
 	slog.Info("Starting audit", "namespace", ns, "severity-min", auditFlags.severityMin)
@@ -140,6 +144,8 @@ func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 			auditFlags.joinKeys,
 		),
 		NamespaceCoverage: result.NamespaceCoverage, // WO-15: retain proven scope for artifact consumers.
+		// WO-42@v2: surface networking-component observations to the report envelope.
+		EnvironmentObservations: result.EnvironmentObservations,
 	}
 
 	reporter, err := selectReporter(auditFlags.format, auditFlags.outputFile)

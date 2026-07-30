@@ -26,6 +26,8 @@ type Data struct {
 	Errors               []string                            `json:"errors,omitempty"`
 	ClusterPositiveEdges []k8s.ClusterPositiveEdgeProjection `json:"cluster_positive_edges,omitempty"` // WO-24: publish stable join-key artifacts when explicitly enabled.
 	NamespaceCoverage    []k8s.NamespaceCoverage             `json:"coverage,omitempty"`               // WO-15: preserve proven scope alongside observations.
+	// WO-42@v2: additive, structurally separate from Findings -- never a posture claim.
+	EnvironmentObservations *k8s.EnvironmentObservations `json:"environment_observations,omitempty"`
 }
 
 // Target identifies what was audited.
