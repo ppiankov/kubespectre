@@ -74,6 +74,8 @@ const (
 	FindingHostPathVolume      FindingID = "HOSTPATH_VOLUME"
 	FindingDangerousCapability FindingID = "DANGEROUS_CAPABILITY"
 	FindingPrivilegeEscalation FindingID = "PRIVILEGE_ESCALATION_ALLOWED"
+	// WO-40: PersistentVolume data-retention check.
+	FindingStaleReleasedVolume FindingID = "STALE_RELEASED_VOLUME"
 )
 
 // WO-38: AllFindingIDs is the canonical registry of every FindingID constant.
@@ -100,6 +102,7 @@ var AllFindingIDs = []FindingID{
 	FindingHostPathVolume,
 	FindingDangerousCapability,
 	FindingPrivilegeEscalation,
+	FindingStaleReleasedVolume,
 }
 
 // Finding represents a single security posture issue.

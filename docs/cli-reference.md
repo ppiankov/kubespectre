@@ -99,6 +99,22 @@ non-privileged container that does not explicitly set
 privileged container is not also flagged for privilege escalation, since
 privileged mode already implies it.
 
+### Stale released volumes
+
+The PersistentVolume auditor flags `STALE_RELEASED_VOLUME` (`medium` severity)
+for any PersistentVolume in `Released` phase with `persistentVolumeReclaimPolicy:
+Retain` whose age (since `status.lastPhaseTransitionTime`, falling back to
+`creationTimestamp` when unset) exceeds `--stale-days`. A `Released` volume
+means its bound PersistentVolumeClaim was deleted; with `reclaimPolicy: Retain`
+the underlying cloud volume (EBS/PD/managed disk) is not deleted and may still
+hold the former workload's data. A volume with `reclaimPolicy: Delete`, or one
+younger than the threshold, is not flagged. The finding's metadata includes
+`reclaim_policy`, `storage_class`, `capacity`, and (when backed by a CSI
+driver) `csi_driver`/`volume_handle` so the operator can locate the underlying
+cloud volume. This check is fully local to the Kubernetes API -- it does not
+call any cloud-provider API and does not confirm the underlying volume still
+exists or estimate its cost.
+
 ### Secret severity for controller-managed secrets
 
 A `STALE_SECRET` or `UNUSED_SECRET_MOUNT` finding on a secret carrying an
