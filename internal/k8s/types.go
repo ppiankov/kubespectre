@@ -78,6 +78,9 @@ const (
 	FindingStaleReleasedVolume FindingID = "STALE_RELEASED_VOLUME"
 	// WO-43: opt-in convention lint, decoupled from CNI capability/enforcement.
 	FindingDefaultDenyBaselineNotDetected FindingID = "DEFAULT_DENY_BASELINE_NOT_DETECTED"
+	// WO-47: Node-level posture -- degraded conditions and kubelet version currency.
+	FindingNodeConditionDegraded      FindingID = "NODE_CONDITION_DEGRADED"
+	FindingNodeKubeletVersionOutdated FindingID = "NODE_KUBELET_VERSION_OUTDATED"
 )
 
 // WO-38: AllFindingIDs is the canonical registry of every FindingID constant.
@@ -106,6 +109,8 @@ var AllFindingIDs = []FindingID{
 	FindingPrivilegeEscalation,
 	FindingStaleReleasedVolume,
 	FindingDefaultDenyBaselineNotDetected,
+	FindingNodeConditionDegraded,
+	FindingNodeKubeletVersionOutdated,
 }
 
 // Finding represents a single security posture issue.

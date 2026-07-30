@@ -154,5 +154,8 @@ func buildSARIFRules() []sarifRule {
 		{ID: string(k8s.FindingStaleReleasedVolume), ShortDescription: sarifMessage{Text: "Stale released PersistentVolume"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},
 		// WO-43: opt-in convention lint, not a vulnerability -- "note" level.
 		{ID: string(k8s.FindingDefaultDenyBaselineNotDetected), ShortDescription: sarifMessage{Text: "Namespace does not match a default-deny NetworkPolicy baseline shape"}, DefaultConfig: sarifDefaultLevel{Level: "note"}},
+		// WO-47: Node-level posture -- degraded conditions and kubelet version currency.
+		{ID: string(k8s.FindingNodeConditionDegraded), ShortDescription: sarifMessage{Text: "Node reports a degraded condition"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
+		{ID: string(k8s.FindingNodeKubeletVersionOutdated), ShortDescription: sarifMessage{Text: "Node kubelet version older than the API server"}, DefaultConfig: sarifDefaultLevel{Level: "note"}},
 	}
 }

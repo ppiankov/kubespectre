@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- New Node auditor: flags a node reporting `MemoryPressure`/`DiskPressure`/`PIDPressure`/`NetworkUnavailable` as `True`, or `Ready` as `False`/`Unknown`, as `NODE_CONDITION_DEGRADED` (`high` severity); flags a node whose kubelet version is older than the API server's as `NODE_KUBELET_VERSION_OUTDATED` (`low`, informational). Uses a fixed, closed allowlist of problem-condition types -- EKS Auto Mode nodes report additional condition types (`NetworkingReady`, `KernelReady`, etc.) where `True` means healthy, the opposite polarity, and are never inspected. This is not a CIS-Kubernetes-Benchmark check: kubelet runtime configuration (anonymous-auth, authorization-mode, etc.) is not visible via the Kubernetes API and requires node-local access this tool does not have.
+
 ## [0.5.0] - 2026-07-30
 
 ### Added
