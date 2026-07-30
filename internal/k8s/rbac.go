@@ -6,8 +6,20 @@ import (
 	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+)
+
+// WO-41: SubjectLiveness is a closed four-value enum recording whether a
+// CLUSTER_ADMIN_BINDING subject's referenced object was confirmed to exist,
+// confirmed absent, could not be checked at all (e.g. RBAC denial), or is
+// structurally not checkable (User/Group are not first-class K8s API objects).
+const (
+	SubjectLivenessConfirmedExists = "confirmed_exists"
+	SubjectLivenessConfirmedAbsent = "confirmed_absent"
+	SubjectLivenessCheckFailed     = "check_failed"
+	SubjectLivenessNotCheckable    = "not_checkable"
 )
 
 // RBACScanner audits RBAC bindings and roles for wildcard permissions and
@@ -48,13 +60,17 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 				if isSystemSubject(subject.Name, subject.Namespace) {
 					continue
 				}
+				// WO-41: subject-liveness is additional context on this existing
+				// finding, never a severity change -- see resolveSubjectLiveness.
+				liveness := resolveSubjectLiveness(ctx, client, subject)
 				findings = append(findings, Finding{
 					ID:           FindingClusterAdminBinding,
 					Severity:     SeverityCritical,
 					ResourceType: "ClusterRoleBinding",
 					ResourceID:   crb.Name,
 					Cluster:      cfg.Cluster,
-					Message:      fmt.Sprintf("cluster-admin bound to %s %s/%s", subject.Kind, subject.Namespace, subject.Name),
+					Message:      clusterAdminBindingMessage(subject, liveness),
+					Metadata:     map[string]any{"subject_kind": subject.Kind, "subject_liveness": liveness},
 				})
 			}
 		}
@@ -135,6 +151,7 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 			if isSystemSubject(subject.Name, subject.Namespace) {
 				continue
 			}
+			liveness := resolveSubjectLiveness(ctx, client, subject)
 			findings = append(findings, Finding{
 				ID:           FindingClusterAdminBinding,
 				Severity:     SeverityCritical,
@@ -142,7 +159,8 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 				ResourceID:   rb.Name,
 				Namespace:    rb.Namespace,
 				Cluster:      cfg.Cluster,
-				Message:      fmt.Sprintf("%s ClusterRole bound to %s %s/%s", rb.RoleRef.Name, subject.Kind, subject.Namespace, subject.Name),
+				Message:      roleBindingAdminMessage(rb.RoleRef.Name, subject, liveness),
+				Metadata:     map[string]any{"subject_kind": subject.Kind, "subject_liveness": liveness},
 			})
 		}
 	}
@@ -210,4 +228,51 @@ func containsWildcard(items []string) bool {
 		}
 	}
 	return false
+}
+
+// WO-41: resolveSubjectLiveness reports whether a CLUSTER_ADMIN_BINDING
+// subject's referenced object was confirmed to exist right now. Only
+// ServiceAccount is a first-class Kubernetes API object; User and Group are
+// authentication-mechanism-asserted identities with no queryable object, so
+// they are always reported not_checkable rather than silently skipped or
+// defaulted to confirmed_exists.
+func resolveSubjectLiveness(ctx context.Context, client kubernetes.Interface, subject rbacv1.Subject) string {
+	if subject.Kind != "ServiceAccount" {
+		return SubjectLivenessNotCheckable
+	}
+	if subject.Namespace == "" {
+		// WO-41: an empty namespace means there is no reliable coordinate to
+		// query -- never guess a namespace, which could resolve to the wrong object.
+		return SubjectLivenessCheckFailed
+	}
+	_, err := client.CoreV1().ServiceAccounts(subject.Namespace).Get(ctx, subject.Name, metav1.GetOptions{})
+	switch {
+	case err == nil:
+		return SubjectLivenessConfirmedExists
+	case apierrors.IsNotFound(err):
+		return SubjectLivenessConfirmedAbsent
+	default:
+		return SubjectLivenessCheckFailed
+	}
+}
+
+// WO-41: clusterAdminBindingMessage adds a liveness-specific sentence only for
+// the confirmed_absent case; every other outcome keeps today's message
+// unchanged so existing consumers are not diluted with a no-op observation.
+func clusterAdminBindingMessage(subject rbacv1.Subject, liveness string) string {
+	base := fmt.Sprintf("cluster-admin bound to %s %s/%s", subject.Kind, subject.Namespace, subject.Name)
+	if liveness == SubjectLivenessConfirmedAbsent {
+		return base + " (subject not found -- namespace or ServiceAccount does not currently exist; safe to revoke immediately, nothing currently depends on it)"
+	}
+	return base
+}
+
+// WO-41: roleBindingAdminMessage mirrors clusterAdminBindingMessage for the
+// namespaced RoleBinding admin-equivalent-grant finding.
+func roleBindingAdminMessage(roleRefName string, subject rbacv1.Subject, liveness string) string {
+	base := fmt.Sprintf("%s ClusterRole bound to %s %s/%s", roleRefName, subject.Kind, subject.Namespace, subject.Name)
+	if liveness == SubjectLivenessConfirmedAbsent {
+		return base + " (subject not found -- namespace or ServiceAccount does not currently exist; safe to revoke immediately, nothing currently depends on it)"
+	}
+	return base
 }

@@ -4,6 +4,9 @@
 
 ### Added
 - New PersistentVolume data-retention auditor: flags a `Released`-phase volume with `reclaimPolicy: Retain` older than `--stale-days` as `STALE_RELEASED_VOLUME` (`medium` severity) -- the underlying cloud volume is not deleted and may still hold the former workload's data
+- `CLUSTER_ADMIN_BINDING` findings now carry `subject_kind` and `subject_liveness` metadata: for a ServiceAccount subject, kubespectre confirms whether the referenced object currently exists (`confirmed_exists`/`confirmed_absent`/`check_failed`); User/Group subjects are reported `not_checkable` since Kubernetes has no API for them. A dangling (`confirmed_absent`) binding's message notes it is safe to revoke immediately since nothing currently depends on it. Severity is never changed by liveness.
+- New opt-in-free `environment_observations.networking` envelope field: a per-object inventory of DaemonSets whose container images match known NetworkPolicy-capable CNI components (AWS VPC CNI's network-policy agent, Calico, Cilium), each with object-local rollout status and (AWS only) enforcing-mode env resolution. This is a per-object observation list only -- it makes no cluster-level enforcement or capability claim, and never alters any existing finding (including `MISSING_NETWORK_POLICY`).
+- New opt-in `--check-default-deny-baseline` flag (disabled by default): flags a namespace as `DEFAULT_DENY_BASELINE_NOT_DETECTED` when its NetworkPolicies (unioned correctly, including the podSelector-`{}`-with-an-allow-all-rule override case) do not match a default-deny baseline shape. This is a convention lint, not a vulnerability finding -- it carries no severity and its message never claims the namespace is insecure; a namespace secured entirely by narrow per-pod allow-list policies is valid and will also not match this shape. Entirely decoupled from CNI capability/enforcement observations.
 
 ## [0.4.4] - 2026-07-25
 

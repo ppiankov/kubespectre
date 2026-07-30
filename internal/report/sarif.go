@@ -152,5 +152,7 @@ func buildSARIFRules() []sarifRule {
 		{ID: string(k8s.FindingPrivilegeEscalation), ShortDescription: sarifMessage{Text: "Privilege escalation allowed"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},
 		// WO-40: stale Released-phase PersistentVolume data-retention finding.
 		{ID: string(k8s.FindingStaleReleasedVolume), ShortDescription: sarifMessage{Text: "Stale released PersistentVolume"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},
+		// WO-43: opt-in convention lint, not a vulnerability -- "note" level.
+		{ID: string(k8s.FindingDefaultDenyBaselineNotDetected), ShortDescription: sarifMessage{Text: "Namespace does not match a default-deny NetworkPolicy baseline shape"}, DefaultConfig: sarifDefaultLevel{Level: "note"}},
 	}
 }

@@ -65,7 +65,11 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 		combined ScanResult
 	)
 
-	g, ctx := errgroup.WithContext(ctx)
+	// WO-42@v2: keep gctx scoped to the auditor fan-out only -- errgroup cancels
+	// its derived context the instant Wait returns (even on success), so the
+	// networking-observation call after g.Wait() below must use the original,
+	// still-live ctx parameter, never this one.
+	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(m.concurrency)
 
 	for _, auditor := range m.auditors {
@@ -83,7 +87,7 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 			switch source := a.(type) {
 			case evidenceAuditor:
 				// WO-6: merge only evidence returned by the sealed ServiceAccount collection path.
-				result, err := source.auditWithEvidence(ctx, m.client, cfg)
+				result, err := source.auditWithEvidence(gctx, m.client, cfg)
 				if err != nil {
 					mu.Lock()
 					combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %v", a.Name(), err))
@@ -99,7 +103,7 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 			case countingAuditor:
 				// WO-25: prefer the counting variant so the auditor reports scanned objects.
 				var err error
-				findings, resourcesScanned, err = source.auditWithCount(ctx, m.client, cfg)
+				findings, resourcesScanned, err = source.auditWithCount(gctx, m.client, cfg)
 				if err != nil {
 					mu.Lock()
 					combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %v", a.Name(), err))
@@ -109,7 +113,7 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 				}
 			default:
 				var err error
-				findings, err = a.Audit(ctx, m.client, cfg)
+				findings, err = a.Audit(gctx, m.client, cfg)
 				if err != nil {
 					mu.Lock()
 					combined.Errors = append(combined.Errors, fmt.Sprintf("%s: %v", a.Name(), err))
@@ -136,6 +140,13 @@ func (m *MultiAuditor) AuditAll(ctx context.Context, cfg AuditConfig) (*ScanResu
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+
+	// WO-42@v2: networking-component observations are collected OUTSIDE the
+	// Auditor/Finding dispatch loop above -- this is the structural guarantee
+	// behind the strong separation invariant: this call cannot alter
+	// combined.Findings because it never participates in that loop at all.
+	observations := ObserveNetworkingComponents(ctx, m.client)
+	combined.EnvironmentObservations = &EnvironmentObservations{Networking: observations}
 
 	return &combined, nil
 }
