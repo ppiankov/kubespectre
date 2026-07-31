@@ -116,6 +116,36 @@ cloud volume. This check is fully local to the Kubernetes API -- it does not
 call any cloud-provider API and does not confirm the underlying volume still
 exists or estimate its cost.
 
+### Node posture
+
+The Node auditor flags `NODE_CONDITION_DEGRADED` (`high` severity) when a
+node reports one of a fixed, closed set of standard problem conditions as
+`True` (`MemoryPressure`, `DiskPressure`, `PIDPressure`,
+`NetworkUnavailable`), or `Ready` as `False`/`Unknown`. Any other condition
+type is never inspected for polarity, deliberately -- **EKS Auto Mode nodes
+report additional condition types (`NetworkingReady`, `KernelReady`,
+`StorageReady`, `ContainerRuntimeReady`, `AcceleratedHardwareReady`) where
+`True` means healthy**, the opposite polarity from the four standard
+conditions; a blanket "any non-`Ready` condition that is `True` is bad" rule
+would misflag every EKS Auto Mode node.
+
+It also flags `NODE_KUBELET_VERSION_OUTDATED` (`low` severity, informational)
+when a node's `kubeletVersion` is numerically older than the API server's
+version (a semver-aware comparison, not a string comparison). This does not
+claim a Kubernetes version-skew *policy* violation unless the minor-version
+gap actually exceeds the documented 3-minor-version policy -- patch-level
+differences across node groups are common during a rolling upgrade and are
+reported as an observation, not an alarm.
+
+**This is not a CIS-Kubernetes-Benchmark check.** Kubelet's actual runtime
+configuration (`--anonymous-auth`, `--authorization-mode`,
+`--read-only-port`, etc. -- the content kube-bench and Kubescape check) lives
+on the node's filesystem or is served only on the kubelet's own port, neither
+reachable from the Kubernetes API server; those tools solve this by running
+a privileged pod or host-sensor on every node, a different architecture from
+kubespectre's single read-only binary. This auditor only observes what the
+`Node` API object itself reports.
+
 ### Secret severity for controller-managed secrets
 
 A `STALE_SECRET` or `UNUSED_SECRET_MOUNT` finding on a secret carrying an

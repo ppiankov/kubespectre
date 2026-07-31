@@ -162,6 +162,7 @@ func AllAuditors() []Auditor {
 		&ImageScanner{},
 		&AuditLogScanner{},
 		&PersistentVolumeScanner{}, // WO-40: stale Released-phase volume retention.
+		&NodeScanner{},             // WO-47: node condition degradation + kubelet version currency.
 	}
 }
 
