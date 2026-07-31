@@ -33,12 +33,19 @@ func (s *SecretScanner) auditWithCount(ctx context.Context, client kubernetes.In
 
 	ns := cfg.Namespace
 
-	secrets, err := client.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+	// WO-48: retry a transient network blip before giving up this auditor's
+	// entire finding set for the run.
+	secrets, err := retryTransient(ctx, func() (*corev1.SecretList, error) {
+		return client.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{})
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list secrets: %w", err)
 	}
 
-	pods, err := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+	// WO-48: same transient-retry treatment for the auxiliary pod-mount lookup.
+	pods, err := retryTransient(ctx, func() (*corev1.PodList, error) {
+		return client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list pods: %w", err)
 	}

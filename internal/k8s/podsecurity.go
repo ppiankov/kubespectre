@@ -34,10 +34,16 @@ func (s *PodSecurityScanner) auditWithCount(ctx context.Context, client kubernet
 	var pods *corev1.PodList
 	var err error
 
+	// WO-48: retry a transient network blip before giving up this auditor's
+	// entire finding set for the run.
 	if cfg.Namespace != "" {
-		pods, err = client.CoreV1().Pods(cfg.Namespace).List(ctx, listOpts)
+		pods, err = retryTransient(ctx, func() (*corev1.PodList, error) {
+			return client.CoreV1().Pods(cfg.Namespace).List(ctx, listOpts)
+		})
 	} else {
-		pods, err = client.CoreV1().Pods("").List(ctx, listOpts)
+		pods, err = retryTransient(ctx, func() (*corev1.PodList, error) {
+			return client.CoreV1().Pods("").List(ctx, listOpts)
+		})
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("list pods: %w", err)
