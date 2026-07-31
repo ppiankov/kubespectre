@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.1] - 2026-07-31
 
 ### Added
 - Transient network failures (stream resets, connection resets) on a List/Create call are now retried up to 3 times with short bounded backoff before an auditor gives up, instead of silently zeroing out that auditor's entire finding set for the run. Permanent errors (RBAC Forbidden/NotFound/Unauthorized) are never retried. Applied to the secret, pod-security, and service-account (per-namespace SSAR) auditors.
