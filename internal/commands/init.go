@@ -76,7 +76,7 @@ severity_min: low
 format: text
 
 # Audit timeout
-timeout: 5m
+timeout: 10m
 
 # Trusted container registries (images from other registries get flagged)
 trusted_registries:
@@ -115,7 +115,7 @@ rules:
   resources: ["persistentvolumeclaims"]
   verbs: ["get", "list"]
 - apiGroups: [""]
-  resources: ["persistentvolumes"]
+  resources: ["nodes", "persistentvolumes"]
   verbs: ["get", "list"]
 - apiGroups: ["apps"]
   resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]

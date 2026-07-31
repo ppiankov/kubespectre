@@ -111,12 +111,13 @@ func TestConfiguredExclusionsRejectsInvalidSelector(t *testing.T) {
 func newAuditOptionsTestCommand(t *testing.T) *cobra.Command {
 	t.Helper()
 	auditFlags = struct {
-		format      string
-		outputFile  string
-		severityMin string
-		staleDays   int
-		timeout     time.Duration
-		joinKeys    bool
+		format                   string
+		outputFile               string
+		severityMin              string
+		staleDays                int
+		timeout                  time.Duration
+		joinKeys                 bool
+		checkDefaultDenyBaseline bool
 	}{}
 	namespace = ""
 	cfg = config.Config{}

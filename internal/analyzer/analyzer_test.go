@@ -62,6 +62,37 @@ func TestAnalyzeNoFindings(t *testing.T) {
 	}
 }
 
+// WO-49: N identical context-deadline-exceeded errors from one auditor must
+// collapse into one summarized message; a lone timeout error and any other
+// error shape must pass through unchanged.
+func TestAnalyze_CollapsesTimeoutErrorCascade(t *testing.T) {
+	result := &k8s.ScanResult{
+		Errors: []string{
+			`service-account: list serviceaccounts in namespace "ns1": Get "...": context deadline exceeded`,
+			`service-account: list serviceaccounts in namespace "ns2": Get "...": context deadline exceeded`,
+			`service-account: list serviceaccounts in namespace "ns3": Get "...": context deadline exceeded`,
+			`secret: list secrets: some other transient failure`,
+			`pod-security: list pods: Get "...": context deadline exceeded`,
+		},
+	}
+
+	ar := Analyze(result, AnalyzerConfig{SeverityMin: k8s.SeverityLow})
+
+	if len(ar.Errors) != 3 {
+		t.Fatalf("got %d errors, want 3 (3 service-account collapsed to 1, plus secret and pod-security unchanged): %v", len(ar.Errors), ar.Errors)
+	}
+	if ar.Errors[0] != "service-account: 3 calls failed with context deadline exceeded (increase --timeout for a cluster this size)" {
+		t.Errorf("collapsed message = %q", ar.Errors[0])
+	}
+	if ar.Errors[1] != `secret: list secrets: some other transient failure` {
+		t.Errorf("non-timeout error changed: %q", ar.Errors[1])
+	}
+	// A single (uncollapsed) timeout error keeps its original text.
+	if ar.Errors[2] != `pod-security: list pods: Get "...": context deadline exceeded` {
+		t.Errorf("lone timeout error changed: %q", ar.Errors[2])
+	}
+}
+
 func TestAnalyzeFilterAll(t *testing.T) {
 	result := &k8s.ScanResult{
 		Findings: []k8s.Finding{

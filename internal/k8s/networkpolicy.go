@@ -68,6 +68,15 @@ func (s *NetworkPolicyScanner) auditWithCount(ctx context.Context, client kubern
 				Message:      "namespace has no NetworkPolicy (default-allow-all)",
 			})
 		}
+
+		// WO-43: opt-in convention lint, reusing the already-fetched per-namespace
+		// NetworkPolicy list (zero new API calls). Entirely decoupled from
+		// MISSING_NETWORK_POLICY -- both may fire independently, since a
+		// namespace can have zero policies (MISSING_NETWORK_POLICY) and a
+		// namespace can have policies that still don't match the baseline shape.
+		if cfg.CheckDefaultDenyBaseline {
+			findings = append(findings, checkDefaultDenyBaseline(ns.Name, policies.Items, cfg.Cluster)...)
+		}
 	}
 
 	// WO-30: report the namespaces actually evaluated for network isolation.

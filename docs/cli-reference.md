@@ -51,8 +51,16 @@ subject.
 | `--severity-min` | low | Minimum severity: critical, high, medium, low |
 | `--stale-days` | 90 | Threshold for stale secrets (days) |
 | `--include-edge-join-keys` | false | Opt in to include join-key fields in `cluster_positive_edges` |
-| `--timeout` | 5m | Audit timeout |
+| `--check-default-deny-baseline` | false | Flag namespaces whose NetworkPolicies do not match a default-deny baseline shape (convention lint, no severity) |
+| `--timeout` | 10m | Audit timeout |
 | `-v, --verbose` | false | Enable verbose logging |
+
+Sizing `--timeout` for larger clusters: 10m is comfortable for small/medium
+clusters, but audit time scales with the number of namespaces (each
+auditor's evidence-collection path does per-namespace API calls). Empirically,
+a 72-namespace cluster took ~7 minutes wall-clock; if `audit` reports
+`context deadline exceeded` errors, raise `--timeout` (e.g. `--timeout 20m`
+for a few hundred namespaces) rather than assuming a tool defect.
 
 ### Configuration
 
@@ -62,7 +70,7 @@ Create `.kubespectre.yaml` (or run `kubespectre init`):
 stale_days: 90
 severity_min: low
 format: text
-timeout: 5m
+timeout: 10m
 trusted_registries:
   - gcr.io/my-project
   - us-docker.pkg.dev/my-project
@@ -115,6 +123,36 @@ cloud volume. This check is fully local to the Kubernetes API -- it does not
 call any cloud-provider API and does not confirm the underlying volume still
 exists or estimate its cost.
 
+### Node posture
+
+The Node auditor flags `NODE_CONDITION_DEGRADED` (`high` severity) when a
+node reports one of a fixed, closed set of standard problem conditions as
+`True` (`MemoryPressure`, `DiskPressure`, `PIDPressure`,
+`NetworkUnavailable`), or `Ready` as `False`/`Unknown`. Any other condition
+type is never inspected for polarity, deliberately -- **EKS Auto Mode nodes
+report additional condition types (`NetworkingReady`, `KernelReady`,
+`StorageReady`, `ContainerRuntimeReady`, `AcceleratedHardwareReady`) where
+`True` means healthy**, the opposite polarity from the four standard
+conditions; a blanket "any non-`Ready` condition that is `True` is bad" rule
+would misflag every EKS Auto Mode node.
+
+It also flags `NODE_KUBELET_VERSION_OUTDATED` (`low` severity, informational)
+when a node's `kubeletVersion` is numerically older than the API server's
+version (a semver-aware comparison, not a string comparison). This does not
+claim a Kubernetes version-skew *policy* violation unless the minor-version
+gap actually exceeds the documented 3-minor-version policy -- patch-level
+differences across node groups are common during a rolling upgrade and are
+reported as an observation, not an alarm.
+
+**This is not a CIS-Kubernetes-Benchmark check.** Kubelet's actual runtime
+configuration (`--anonymous-auth`, `--authorization-mode`,
+`--read-only-port`, etc. -- the content kube-bench and Kubescape check) lives
+on the node's filesystem or is served only on the kubelet's own port, neither
+reachable from the Kubernetes API server; those tools solve this by running
+a privileged pod or host-sensor on every node, a different architecture from
+kubespectre's single read-only binary. This auditor only observes what the
+`Node` API object itself reports.
+
 ### Secret severity for controller-managed secrets
 
 A `STALE_SECRET` or `UNUSED_SECRET_MOUNT` finding on a secret carrying an
@@ -150,6 +188,14 @@ Use `--include-edge-join-keys` to opt in to non-sensitive join keys for downstre
 
 Join-key output is disabled by default.
 - `coverage` — per-namespace scope proof. A namespace is `complete` only when a SelfSubjectAccessReview confirms permission to list ServiceAccounts in it; otherwise it is `unknown`. Uncovered namespaces produce no absence claim.
+
+Every `CLUSTER_ADMIN_BINDING` finding's `metadata` carries `subject_kind` (`ServiceAccount`/`User`/`Group`) and `subject_liveness`, a closed four-value enum: `confirmed_exists` (the ServiceAccount was found), `confirmed_absent` (the ServiceAccount does not currently exist -- the binding is inert but reactivates full `cluster-admin` the instant anything recreates that namespace/ServiceAccount name), `check_failed` (the existence check itself failed, e.g. an RBAC denial -- never treated as absence), or `not_checkable` (User/Group subjects -- Kubernetes has no API to check these). Severity is always `critical` regardless of `subject_liveness`; only the message text changes, and only for `confirmed_absent`.
+
+- `environment_observations.networking` — a per-object inventory of DaemonSets whose container images match a known NetworkPolicy-capable CNI component (AWS VPC CNI's network-policy agent, Calico, Cilium). Each `fingerprint_matches[]` entry carries `implementation_hint`, the exact `resource` (kind/namespace/name), `matched_signals`, an object-local `rollout` state (`running`/`rollout_incomplete`/`not_running`/`readiness_unknown`), and (AWS only) `enforcing_mode` (`mode_literal:<value>`/`mode_none`/`mode_via_ref_unresolved`/`mode_absent`). `limitations[]` is always present and `observation_errors[]` records a failed lookup distinctly from a genuinely empty result. **This is a per-object observation list only** -- it makes no cluster-level enforcement, capability, or restrictiveness claim, multiple matching components (e.g. both AWS and Calico) are reported independently with no reduction, and it never alters `MISSING_NETWORK_POLICY` or any other finding.
+
+### Default-deny baseline lint (opt-in)
+
+With `--check-default-deny-baseline`, a namespace whose NetworkPolicies do not match a default-deny baseline shape is flagged as `DEFAULT_DENY_BASELINE_NOT_DETECTED`. A namespace matches the baseline only if some policy with an empty `podSelector` (`{}`, selecting every pod) denies a direction (an empty rule list for that direction) **and** no `{}`-selecting policy allows that direction unconditionally (a rule with no `from`/`to`/`ports` restriction) -- this correctly handles the case where a second `{}`-selecting policy's allow-all rule silently overrides an otherwise-correct default-deny policy. This is a **convention lint, not a vulnerability finding**: it carries no severity, and its message never claims the namespace is insecure -- a namespace secured entirely by narrow per-pod allow-list policies (no `{}`-selecting policy at all) is a valid, intentional architecture that will also not match this shape. Disabled by default, and entirely decoupled from the `environment_observations.networking` CNI-capability plane above.
 
 The `summary.total_resources_scanned` field reports the aggregate number of
 Kubernetes objects the audit examined across all auditors. It is a scan-operation
