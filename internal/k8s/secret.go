@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
@@ -50,6 +51,18 @@ func (s *SecretScanner) auditWithCount(ctx context.Context, client kubernetes.In
 
 	mountedSecrets := buildMountedSecretSet(pods.Items)
 
+	// WO-53: Ingress .spec.tls[].secretName is the standard, non-pod-mount
+	// consumption path for kubernetes.io/tls secrets -- best-effort merge:
+	// a failure to list Ingresses degrades to pod-only detection rather than
+	// failing the whole auditor, since this is an additive signal.
+	if ingresses, ingErr := retryTransient(ctx, func() (*networkingv1.IngressList, error) {
+		return client.NetworkingV1().Ingresses(ns).List(ctx, metav1.ListOptions{})
+	}); ingErr == nil {
+		for key := range buildIngressTLSSecretSet(ingresses.Items) {
+			mountedSecrets[key] = true
+		}
+	}
+
 	staleDays := cfg.StaleDays
 	if staleDays <= 0 {
 		staleDays = 90
@@ -86,13 +99,19 @@ func (s *SecretScanner) auditWithCount(ctx context.Context, client kubernetes.In
 		// the operator has disabled this recognition.
 		managed := !cfg.DisableManagedSecretDownranking && isManagedSecret(secret, managedMarkers)
 
-		// Check staleness
-		if secret.CreationTimestamp.Time.Before(staleThreshold) {
+		// WO-52: use the most recent of creationTimestamp and any
+		// managedFields[].time as the staleness clock -- creationTimestamp
+		// alone never changes when a secret is updated in place (the normal
+		// pattern for most secret-managing controllers, not just cert-manager/
+		// external-secrets), so a secret actively rotated for years would
+		// otherwise still report a stale, multi-year-old creation date.
+		lastModified := secretEffectiveLastModified(secret)
+		if lastModified.Before(staleThreshold) {
 			severity := SeverityHigh
-			message := fmt.Sprintf("secret created %d+ days ago (threshold: %d days)", staleDays, staleDays)
+			message := fmt.Sprintf("secret not modified in %d+ days (threshold: %d days)", staleDays, staleDays)
 			if managed {
 				severity = SeverityMedium
-				message = fmt.Sprintf("secret created %d+ days ago (threshold: %d days); carries a recognized controller-managed marker, so age alone does not indicate an unrotated or forgotten credential", staleDays, staleDays)
+				message = fmt.Sprintf("secret not modified in %d+ days (threshold: %d days); carries a recognized controller-managed marker, so age alone does not indicate an unrotated or forgotten credential", staleDays, staleDays)
 			}
 			findings = append(findings, Finding{
 				ID:           FindingStaleSecret,
@@ -102,7 +121,11 @@ func (s *SecretScanner) auditWithCount(ctx context.Context, client kubernetes.In
 				Namespace:    secret.Namespace,
 				Cluster:      cfg.Cluster,
 				Message:      message,
-				Metadata:     map[string]any{"created": secret.CreationTimestamp.Format(time.RFC3339), "managed": managed},
+				Metadata: map[string]any{
+					"created":       secret.CreationTimestamp.Format(time.RFC3339),
+					"last_modified": lastModified.Format(time.RFC3339),
+					"managed":       managed,
+				},
 			})
 		}
 
@@ -192,6 +215,41 @@ func buildMountedSecretSet(pods []corev1.Pod) map[string]bool {
 		}
 	}
 	return mounted
+}
+
+// WO-53: buildIngressTLSSecretSet marks every secret referenced by an
+// Ingress's spec.tls[].secretName as consumed -- the standard, non-pod-mount
+// consumption path for kubernetes.io/tls secrets. Without this, a manually
+// created or non-cert-manager-managed TLS secret used only by an Ingress
+// produces a false "not mounted by any pod" finding.
+func buildIngressTLSSecretSet(ingresses []networkingv1.Ingress) map[string]bool {
+	referenced := make(map[string]bool)
+	for _, ing := range ingresses {
+		for _, tls := range ing.Spec.TLS {
+			if tls.SecretName == "" {
+				continue
+			}
+			referenced[ing.Namespace+"/"+tls.SecretName] = true
+		}
+	}
+	return referenced
+}
+
+// WO-52: secretEffectiveLastModified returns the most recent signal of when
+// this secret's content was last touched: the latest managedFields[].time if
+// present (populated by the API server's field-management tracking on any
+// update, not just an explicit server-side apply), or creationTimestamp if no
+// managedFields entry carries a time. This avoids treating a secret that is
+// actively updated in place as if it were forgotten just because its object
+// was created long ago.
+func secretEffectiveLastModified(secret corev1.Secret) time.Time {
+	latest := secret.CreationTimestamp.Time
+	for _, mf := range secret.ManagedFields {
+		if mf.Time != nil && mf.Time.After(latest) {
+			latest = mf.Time.Time
+		}
+	}
+	return latest
 }
 
 func isHelmSecret(secret corev1.Secret) bool {

@@ -39,6 +39,23 @@ resources, and `ClusterRoleBinding` **and** namespaced `RoleBinding` grants of a
 admin-equivalent ClusterRole (`cluster-admin`/`admin`/`edit`) to a non-system
 subject.
 
+`WILDCARD_RBAC` is never suppressed for a role matching either pattern below --
+both only annotate `metadata` and, for the second, down-rank severity, so an
+operator triaging a large finding count can distinguish likely-benign shapes
+from genuinely risky custom roles at a glance:
+
+- A role/subject name prefixed by a configured `system_managed_role_prefixes`
+  entry (defaulting to `eks:` and `system:`) carries `likely_system_managed:
+  true` in its metadata. Severity is unchanged -- this only marks it as likely
+  cloud-platform-managed, not operator-actionable.
+- A rule whose resources are **exactly** `["leases"]` (no other resource in the
+  same rule) is reported at `low` severity with `narrow_wildcard_resource:
+  true` -- the near-universal controller-runtime/kubebuilder leader-election
+  scaffolding pattern, present in essentially every microservice using that
+  framework, with minimal blast radius. A rule combining `leases` with any
+  other resource, or a role that also has a broader wildcard rule, stays at
+  full severity.
+
 ### Flags
 
 | Flag | Default | Description |
@@ -83,6 +100,9 @@ managed_secret_markers:
   - cert-manager.io/
   - external-secrets.io/
 disable_managed_secret_downranking: false
+system_managed_role_prefixes:
+  - "eks:"
+  - "system:"
 exclude:
   namespaces:
     - kube-system
@@ -166,6 +186,23 @@ webhook `caBundle` injection). Neither finding is ever suppressed, only
 down-ranked. Set `disable_managed_secret_downranking: true` to opt back into
 uniform `high` severity for both finding types regardless of markers, or set
 `managed_secret_markers` to your own list to recognize other controllers.
+
+`STALE_SECRET`'s staleness clock is the more recent of the secret's
+`creationTimestamp` and any `managedFields[].time` entry, not
+`creationTimestamp` alone -- a secret updated in place (the normal pattern for
+most secret-managing controllers, not just the two named above) never gets a
+new `creationTimestamp`, so using creation date alone would misreport an
+actively-rotated secret as forgotten. The finding's `metadata` carries both
+`created` and `last_modified` so the distinction is visible in JSON output.
+
+`UNUSED_SECRET_MOUNT` also checks Ingress `.spec.tls[].secretName` in the same
+namespace, in addition to pod volume/env references -- a `kubernetes.io/tls`
+secret referenced only by an Ingress (the standard TLS-termination path,
+never a pod mount by design) is correctly treated as consumed rather than
+flagged as unused. This is best-effort: a failure to list Ingresses degrades
+to pod-only detection rather than failing the whole auditor. Other
+non-pod-mount consumption paths (webhook `caBundle`, an operator reading a
+secret directly via the API) remain a known, undetected limitation.
 
 An excluded namespace is treated as fully out of scope: it produces **no
 findings, no `cluster_positive_edges`, and no `coverage` entry**. It is absent

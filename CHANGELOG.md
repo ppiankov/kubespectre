@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `STALE_SECRET`'s staleness clock now uses the more recent of `creationTimestamp` and any `managedFields[].time` entry, instead of `creationTimestamp` alone -- a secret updated in place (the normal pattern for most secret-managing controllers) never gets a new `creationTimestamp`, so age-alone would misreport an actively-rotated secret as forgotten. Finding metadata now carries both `created` and `last_modified`.
+- `UNUSED_SECRET_MOUNT` now also checks Ingress `.spec.tls[].secretName` in the same namespace, in addition to pod volume/env references -- a `kubernetes.io/tls` secret referenced only by an Ingress (the standard TLS-termination path, never a pod mount by design) is no longer incorrectly flagged as unused. Best-effort: a failure to list Ingresses degrades to pod-only detection rather than failing the whole auditor.
+- `WILDCARD_RBAC` findings are never suppressed but now carry distinguishing metadata: a role/subject name prefixed by a configured `system_managed_role_prefixes` entry (default `eks:`, `system:`) carries `likely_system_managed: true`; a rule whose resources are exactly `["leases"]` (the near-universal controller-runtime leader-election pattern) is down-ranked to `low` severity with `narrow_wildcard_resource: true`. A role combining a leases-only rule with any broader wildcard rule stays at full severity.
+
 ## [0.6.3] - 2026-07-31
 
 ### Fixed

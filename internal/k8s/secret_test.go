@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -76,6 +77,177 @@ func TestSecretScanner_UnusedSecret(t *testing.T) {
 	}
 	if findings[0].ID != FindingUnusedSecretMount {
 		t.Errorf("finding ID = %q, want %q", findings[0].ID, FindingUnusedSecretMount)
+	}
+}
+
+// WO-52: a secret with an old creationTimestamp but a recent managedFields
+// time must NOT be flagged stale -- creationTimestamp alone never changes
+// when a secret is updated in place (the normal pattern for most
+// secret-managing controllers), so this is the load-bearing regression this
+// WO fixes.
+func TestSecretScanner_RecentManagedFieldsTimeNotFlaggedStale(t *testing.T) {
+	oldTime := metav1.NewTime(time.Now().AddDate(-2, 0, 0))
+	recentTime := metav1.NewTime(time.Now().AddDate(0, 0, -1))
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "actively-rotated",
+				Namespace:         "default",
+				CreationTimestamp: oldTime,
+				ManagedFields: []metav1.ManagedFieldsEntry{
+					{Manager: "some-controller", Time: &recentTime},
+				},
+			},
+			Type: corev1.SecretTypeOpaque,
+		},
+		// Pod that mounts the secret so only the staleness check is exercised.
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "app"}},
+				Volumes: []corev1.Volume{
+					{Name: "sec", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "actively-rotated"}}},
+				},
+			},
+		},
+	)
+
+	scanner := &SecretScanner{}
+	findings, err := scanner.Audit(context.Background(), client, AuditConfig{Cluster: "test", StaleDays: 90})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("got %d findings, want 0 (recent managedFields time means the secret is actively maintained, not stale): %#v", len(findings), findings)
+	}
+}
+
+// WO-52: a secret with no managedFields entries falls back to
+// creationTimestamp unchanged -- identical to pre-WO-52 behavior.
+func TestSecretScanner_NoManagedFieldsFallsBackToCreationTimestamp(t *testing.T) {
+	oldTime := metav1.NewTime(time.Now().AddDate(0, 0, -100))
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "no-managed-fields",
+				Namespace:         "default",
+				CreationTimestamp: oldTime,
+			},
+			Type: corev1.SecretTypeOpaque,
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{Name: "app"}},
+				Volumes: []corev1.Volume{
+					{Name: "sec", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "no-managed-fields"}}},
+				},
+			},
+		},
+	)
+
+	scanner := &SecretScanner{}
+	findings, err := scanner.Audit(context.Background(), client, AuditConfig{Cluster: "test", StaleDays: 90})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != FindingStaleSecret {
+		t.Fatalf("findings = %#v, want 1 STALE_SECRET (no managedFields, falls back to creationTimestamp)", findings)
+	}
+}
+
+// WO-53: a manually created (non-managed-marker) TLS secret referenced only
+// by an Ingress's spec.tls[].secretName must NOT produce UNUSED_SECRET_MOUNT
+// -- previously this was the exact false-positive class this check had no
+// mitigation for.
+func TestSecretScanner_IngressReferencedTLSSecretNotFlaggedUnused(t *testing.T) {
+	recentTime := metav1.NewTime(time.Now().AddDate(0, 0, -1))
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "manual-tls",
+				Namespace:         "default",
+				CreationTimestamp: recentTime,
+			},
+			Type: corev1.SecretTypeTLS,
+		},
+		&networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
+			Spec: networkingv1.IngressSpec{
+				TLS: []networkingv1.IngressTLS{{SecretName: "manual-tls"}},
+			},
+		},
+	)
+
+	scanner := &SecretScanner{}
+	findings, err := scanner.Audit(context.Background(), client, AuditConfig{Cluster: "test", StaleDays: 90})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("got %d findings, want 0 (secret is Ingress-referenced, not genuinely unused): %#v", len(findings), findings)
+	}
+}
+
+// WO-53: a TLS secret not referenced by any pod or Ingress still produces
+// UNUSED_SECRET_MOUNT unchanged.
+func TestSecretScanner_UnreferencedTLSSecretStillFlagged(t *testing.T) {
+	recentTime := metav1.NewTime(time.Now().AddDate(0, 0, -1))
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "orphan-tls",
+				Namespace:         "default",
+				CreationTimestamp: recentTime,
+			},
+			Type: corev1.SecretTypeTLS,
+		},
+		&networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
+			Spec: networkingv1.IngressSpec{
+				TLS: []networkingv1.IngressTLS{{SecretName: "some-other-secret"}},
+			},
+		},
+	)
+
+	scanner := &SecretScanner{}
+	findings, err := scanner.Audit(context.Background(), client, AuditConfig{Cluster: "test", StaleDays: 90})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != FindingUnusedSecretMount {
+		t.Fatalf("findings = %#v, want 1 UNUSED_SECRET_MOUNT (not referenced by any pod or matching Ingress)", findings)
+	}
+}
+
+// WO-53: an Ingress in a different namespace from the secret must not mark
+// it consumed -- Ingress TLS references are namespace-scoped.
+func TestSecretScanner_IngressInDifferentNamespaceDoesNotMarkSecretMounted(t *testing.T) {
+	recentTime := metav1.NewTime(time.Now().AddDate(0, 0, -1))
+	client := fake.NewSimpleClientset(
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "cross-ns-tls",
+				Namespace:         "default",
+				CreationTimestamp: recentTime,
+			},
+			Type: corev1.SecretTypeTLS,
+		},
+		&networkingv1.Ingress{
+			ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "other-ns"},
+			Spec: networkingv1.IngressSpec{
+				TLS: []networkingv1.IngressTLS{{SecretName: "cross-ns-tls"}},
+			},
+		},
+	)
+
+	scanner := &SecretScanner{}
+	findings, err := scanner.Audit(context.Background(), client, AuditConfig{Cluster: "test", StaleDays: 90})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != FindingUnusedSecretMount {
+		t.Fatalf("findings = %#v, want 1 UNUSED_SECRET_MOUNT (Ingress in a different namespace must not count)", findings)
 	}
 }
 

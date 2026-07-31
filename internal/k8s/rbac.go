@@ -11,6 +11,26 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// WO-54: defaultSystemManagedRolePrefixes are ClusterRole/Role name prefixes
+// recognized as cloud-platform-managed, used when
+// AuditConfig.SystemManagedRolePrefixes is empty. This never suppresses
+// WILDCARD_RBAC -- unlike isSystemRole below, which fully excludes findings
+// for the built-in system:/cluster-admin/admin/edit/view roles -- it only
+// adds metadata so an operator triaging output can separate platform-managed
+// roles (not operator-actionable) from custom app roles at a glance.
+var defaultSystemManagedRolePrefixes = []string{"eks:", "system:"}
+
+// WO-54: rbacNarrowWildcardResources is a closed allowlist of resource lists
+// so narrow that a wildcard verb on them alone poses minimal risk -- e.g.
+// leader-election leases, the near-universal controller-runtime/kubebuilder
+// scaffolding pattern seen in essentially every microservice using that
+// framework. A rule combining one of these resources with any other resource
+// is NOT matched, since the moment another resource is added the
+// narrow-blast-radius assumption no longer holds.
+var rbacNarrowWildcardResources = [][]string{
+	{"leases"},
+}
+
 // WO-41: SubjectLiveness is a closed four-value enum recording whether a
 // CLUSTER_ADMIN_BINDING subject's referenced object was confirmed to exist,
 // confirmed absent, could not be checked at all (e.g. RBAC denial), or is
@@ -92,14 +112,7 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 			continue
 		}
 		if ruleHasWildcard(role.Rules) {
-			findings = append(findings, Finding{
-				ID:           FindingWildcardRBAC,
-				Severity:     SeverityCritical,
-				ResourceType: "ClusterRole",
-				ResourceID:   role.Name,
-				Cluster:      cfg.Cluster,
-				Message:      wildcardRuleMessage(role.Rules),
-			})
+			findings = append(findings, buildWildcardRBACFinding("ClusterRole", role.Name, "", cfg, role.Rules))
 		}
 	}
 
@@ -119,15 +132,7 @@ func (s *RBACScanner) auditWithCount(ctx context.Context, client kubernetes.Inte
 			continue
 		}
 		if ruleHasWildcard(role.Rules) {
-			findings = append(findings, Finding{
-				ID:           FindingWildcardRBAC,
-				Severity:     SeverityCritical,
-				ResourceType: "Role",
-				ResourceID:   role.Name,
-				Namespace:    role.Namespace,
-				Cluster:      cfg.Cluster,
-				Message:      wildcardRuleMessage(role.Rules),
-			})
+			findings = append(findings, buildWildcardRBACFinding("Role", role.Name, role.Namespace, cfg, role.Rules))
 		}
 	}
 
@@ -219,6 +224,102 @@ func wildcardRuleMessage(rules []rbacv1.PolicyRule) string {
 		}
 	}
 	return "wildcard permission"
+}
+
+// WO-54: buildWildcardRBACFinding shares the metadata/severity decision
+// between the ClusterRole and namespaced Role wildcard checks. Neither
+// condition ever suppresses the finding -- it always appears -- only the
+// severity and metadata distinguish a likely-benign shape from the default.
+func buildWildcardRBACFinding(resourceType, name, namespace string, cfg AuditConfig, rules []rbacv1.PolicyRule) Finding {
+	severity := SeverityCritical
+	var metadata map[string]any
+
+	if isLikelySystemManagedRoleName(name, cfg.SystemManagedRolePrefixes) {
+		metadata = map[string]any{"likely_system_managed": true}
+	}
+	if wildcardRulesAreAllNarrow(rules) {
+		severity = SeverityLow
+		if metadata == nil {
+			metadata = map[string]any{}
+		}
+		metadata["narrow_wildcard_resource"] = true
+	}
+
+	return Finding{
+		ID:           FindingWildcardRBAC,
+		Severity:     severity,
+		ResourceType: resourceType,
+		ResourceID:   name,
+		Namespace:    namespace,
+		Cluster:      cfg.Cluster,
+		Message:      wildcardRuleMessage(rules),
+		Metadata:     metadata,
+	}
+}
+
+// WO-54: isLikelySystemManagedRoleName reports whether name matches a
+// recognized cloud-platform-managed prefix. Empty prefixes falls back to
+// defaultSystemManagedRolePrefixes (eks:, system:).
+func isLikelySystemManagedRoleName(name string, prefixes []string) bool {
+	if len(prefixes) == 0 {
+		prefixes = defaultSystemManagedRolePrefixes
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// WO-54: wildcardRulesAreAllNarrow reports whether every wildcard-triggering
+// rule in rules matches the narrow-resource allowlist exactly. A role
+// combining a narrow-resource wildcard rule with any broader wildcard rule
+// returns false, so it stays at full severity.
+func wildcardRulesAreAllNarrow(rules []rbacv1.PolicyRule) bool {
+	sawWildcard := false
+	for _, rule := range rules {
+		if !containsWildcard(rule.Verbs) && !containsWildcard(rule.Resources) {
+			continue
+		}
+		sawWildcard = true
+		if !resourcesMatchNarrowAllowlist(rule.Resources) {
+			return false
+		}
+	}
+	return sawWildcard
+}
+
+// WO-54: resourcesMatchNarrowAllowlist reports whether resources is exactly
+// (order-independent, no extras) one of rbacNarrowWildcardResources' entries.
+func resourcesMatchNarrowAllowlist(resources []string) bool {
+	for _, allowed := range rbacNarrowWildcardResources {
+		if stringSetsEqual(resources, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+// WO-54: stringSetsEqual compares two string slices as sets (order-independent,
+// duplicate-sensitive counts).
+func stringSetsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, v := range a {
+		counts[v]++
+	}
+	for _, v := range b {
+		counts[v]--
+	}
+	for _, c := range counts {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func containsWildcard(items []string) bool {

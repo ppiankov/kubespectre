@@ -112,6 +112,7 @@ func runAuditWithAuditors(cmd *cobra.Command, auditors []k8s.Auditor) error {
 		DangerousCapabilities:           cfg.DangerousCapabilities,
 		ManagedSecretMarkers:            cfg.ManagedSecretMarkers,
 		DisableManagedSecretDownranking: cfg.DisableManagedSecretDownranking,
+		SystemManagedRolePrefixes:       cfg.SystemManagedRolePrefixes, // WO-54
 		Cluster:                         resolveClusterName(),
 		Exclusions:                      exclusions, // WO-20: carry the validated operator scan boundary.
 		CheckDefaultDenyBaseline:        auditFlags.checkDefaultDenyBaseline,
