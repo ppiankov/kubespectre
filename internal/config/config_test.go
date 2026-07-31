@@ -20,6 +20,8 @@ trusted_registries:
 dangerous_capabilities:
   - NET_ADMIN
   - CHOWN
+system_managed_role_prefixes:
+  - "acme-platform:"
 exclude:
   namespaces:
     - kube-system
@@ -53,6 +55,10 @@ exclude:
 	// WO-35: pins DangerousCapabilities parsing from the config file.
 	if len(cfg.DangerousCapabilities) != 2 {
 		t.Errorf("DangerousCapabilities len = %d, want 2", len(cfg.DangerousCapabilities))
+	}
+	// WO-54: pins SystemManagedRolePrefixes parsing from the config file.
+	if len(cfg.SystemManagedRolePrefixes) != 1 || cfg.SystemManagedRolePrefixes[0] != "acme-platform:" {
+		t.Errorf("SystemManagedRolePrefixes = %#v, want [acme-platform:]", cfg.SystemManagedRolePrefixes)
 	}
 	if len(cfg.Exclude.Namespaces) != 1 {
 		t.Errorf("Exclude.Namespaces len = %d, want 1", len(cfg.Exclude.Namespaces))

@@ -425,3 +425,162 @@ func TestRBACScanner_SubjectLivenessCheckFailed(t *testing.T) {
 		t.Errorf("message = %q, must not claim dangling status on check_failed", f.Message)
 	}
 }
+
+// WO-54: a cloud-managed system role (eks: prefix) must still be flagged --
+// never suppressed -- but carries likely_system_managed metadata so an
+// operator can distinguish it from a custom app role at a glance.
+func TestRBACScanner_WildcardEKSSystemRoleAnnotatedNotSuppressed(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "eks:addon-manager"},
+			Rules: []rbacv1.PolicyRule{
+				{Verbs: []string{"list", "watch"}, Resources: []string{"*"}, APIGroups: []string{""}},
+			},
+		},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1 (system-managed roles must still be flagged, not suppressed)", len(findings))
+	}
+	f := findings[0]
+	if f.Metadata["likely_system_managed"] != true {
+		t.Errorf("metadata = %#v, want likely_system_managed=true", f.Metadata)
+	}
+	if f.Severity != SeverityCritical {
+		t.Errorf("severity = %q, want %q (system-managed annotation does not change severity)", f.Severity, SeverityCritical)
+	}
+}
+
+// WO-54: a custom app role with the same wildcard shape as a system role
+// must NOT be marked likely_system_managed.
+func TestRBACScanner_WildcardCustomRoleNotMarkedSystemManaged(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "talala-admin-role"},
+			Rules: []rbacv1.PolicyRule{
+				{Verbs: []string{"*"}, Resources: []string{"*"}, APIGroups: []string{"*"}},
+			},
+		},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	if findings[0].Metadata["likely_system_managed"] == true {
+		t.Errorf("custom app role incorrectly marked likely_system_managed: %#v", findings[0].Metadata)
+	}
+}
+
+// WO-54: SystemManagedRolePrefixes config overrides the default eks:/system: list.
+func TestRBACScanner_WildcardCustomSystemManagedPrefixConfigured(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "acme-platform:controller"},
+			Rules: []rbacv1.PolicyRule{
+				{Verbs: []string{"*"}, Resources: []string{"*"}, APIGroups: []string{"*"}},
+			},
+		},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{
+		Cluster:                   "test",
+		SystemManagedRolePrefixes: []string{"acme-platform:"},
+	})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].Metadata["likely_system_managed"] != true {
+		t.Fatalf("findings = %#v, want 1 marked likely_system_managed via configured prefix", findings)
+	}
+}
+
+// WO-54: a rule whose resources are exactly [leases] is down-ranked to low
+// severity and annotated, since leader-election leases pose minimal risk --
+// this is the near-universal controller-runtime scaffolding pattern.
+func TestRBACScanner_WildcardLeasesOnlyDownranked(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "wallet-go"},
+			Rules: []rbacv1.PolicyRule{
+				{Verbs: []string{"*"}, Resources: []string{"leases"}, APIGroups: []string{"coordination.k8s.io"}},
+			},
+		},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	f := findings[0]
+	if f.Severity != SeverityLow {
+		t.Errorf("severity = %q, want %q (leases-only wildcard)", f.Severity, SeverityLow)
+	}
+	if f.Metadata["narrow_wildcard_resource"] != true {
+		t.Errorf("metadata = %#v, want narrow_wildcard_resource=true", f.Metadata)
+	}
+}
+
+// WO-54: a role combining a leases-only wildcard rule with a broader
+// wildcard rule must stay at full severity -- the narrow-resource allowlist
+// covers ONLY a rule whose resources are leases and nothing else.
+func TestRBACScanner_WildcardLeasesPlusBroaderRuleStaysFullSeverity(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "mixed-role"},
+			Rules: []rbacv1.PolicyRule{
+				{Verbs: []string{"*"}, Resources: []string{"leases"}, APIGroups: []string{"coordination.k8s.io"}},
+				{Verbs: []string{"*"}, Resources: []string{"*"}, APIGroups: []string{"*"}},
+			},
+		},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	f := findings[0]
+	if f.Severity != SeverityCritical {
+		t.Errorf("severity = %q, want %q (broader rule present, must not downrank)", f.Severity, SeverityCritical)
+	}
+	if f.Metadata["narrow_wildcard_resource"] == true {
+		t.Errorf("metadata = %#v, must not mark narrow_wildcard_resource when a broader rule is also present", f.Metadata)
+	}
+}
+
+// WO-54: a rule granting leases plus another resource (not leases-only) must
+// NOT be down-ranked -- only an exact, narrow leases-only grant qualifies.
+func TestRBACScanner_WildcardLeasesPlusOtherResourceInSameRuleNotDownranked(t *testing.T) {
+	client := fake.NewSimpleClientset(
+		&rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: "leases-and-configmaps"},
+			Rules: []rbacv1.PolicyRule{
+				{Verbs: []string{"*"}, Resources: []string{"leases", "configmaps"}, APIGroups: []string{"coordination.k8s.io", ""}},
+			},
+		},
+	)
+
+	findings, err := (&RBACScanner{}).Audit(context.Background(), client, AuditConfig{Cluster: "test"})
+	if err != nil {
+		t.Fatalf("Audit() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want 1", len(findings))
+	}
+	if findings[0].Severity != SeverityCritical {
+		t.Errorf("severity = %q, want %q (leases+configmaps is not the narrow leases-only shape)", findings[0].Severity, SeverityCritical)
+	}
+}

@@ -221,6 +221,12 @@ type AuditConfig struct {
 	Exclusions                      Exclusions // WO-19: immutable operator-declared scan boundary.
 	// WO-43: opt-in, disabled by default; decoupled from CNI capability state.
 	CheckDefaultDenyBaseline bool
+	// WO-54: SystemManagedRolePrefixes are ClusterRole/Role name prefixes
+	// recognized as cloud-platform-managed; empty uses the built-in default
+	// list (eks:, system:). Never suppresses WILDCARD_RBAC -- only annotates
+	// metadata so an operator can distinguish platform-managed roles from
+	// custom app roles.
+	SystemManagedRolePrefixes []string
 }
 
 // WO-6: ClusterPositiveEdgeType is closed to the three ratified positive observations.

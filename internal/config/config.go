@@ -23,7 +23,10 @@ type Config struct {
 	DangerousCapabilities           []string `yaml:"dangerous_capabilities"`
 	ManagedSecretMarkers            []string `yaml:"managed_secret_markers"`
 	DisableManagedSecretDownranking bool     `yaml:"disable_managed_secret_downranking"`
-	Exclude                         Exclude  `yaml:"exclude"`
+	// WO-54: SystemManagedRolePrefixes overrides RBACScanner's default
+	// likely-system-managed name-prefix recognition for WILDCARD_RBAC metadata.
+	SystemManagedRolePrefixes []string `yaml:"system_managed_role_prefixes"`
+	Exclude                   Exclude  `yaml:"exclude"`
 }
 
 // Exclude defines resources to skip during auditing.
