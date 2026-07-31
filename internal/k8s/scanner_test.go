@@ -216,7 +216,8 @@ func TestMultiAuditorDefaultConcurrency(t *testing.T) {
 }
 
 func TestAllAuditors(t *testing.T) {
-	// WO-47: bumped from 8 to 9 with the Node auditor.
+	// WO-47: bumped from 8 to 9 with the Node auditor (WO-40's PersistentVolume
+	// auditor already counted in the prior bump to 8).
 	auditors := AllAuditors()
 	if len(auditors) != 9 {
 		t.Errorf("got %d auditors, want 9", len(auditors))
