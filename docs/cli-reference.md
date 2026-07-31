@@ -52,8 +52,15 @@ subject.
 | `--stale-days` | 90 | Threshold for stale secrets (days) |
 | `--include-edge-join-keys` | false | Opt in to include join-key fields in `cluster_positive_edges` |
 | `--check-default-deny-baseline` | false | Flag namespaces whose NetworkPolicies do not match a default-deny baseline shape (convention lint, no severity) |
-| `--timeout` | 5m | Audit timeout |
+| `--timeout` | 10m | Audit timeout |
 | `-v, --verbose` | false | Enable verbose logging |
+
+Sizing `--timeout` for larger clusters: 10m is comfortable for small/medium
+clusters, but audit time scales with the number of namespaces (each
+auditor's evidence-collection path does per-namespace API calls). Empirically,
+a 72-namespace cluster took ~7 minutes wall-clock; if `audit` reports
+`context deadline exceeded` errors, raise `--timeout` (e.g. `--timeout 20m`
+for a few hundred namespaces) rather than assuming a tool defect.
 
 ### Configuration
 
@@ -63,7 +70,7 @@ Create `.kubespectre.yaml` (or run `kubespectre init`):
 stale_days: 90
 severity_min: low
 format: text
-timeout: 5m
+timeout: 10m
 trusted_registries:
   - gcr.io/my-project
   - us-docker.pkg.dev/my-project

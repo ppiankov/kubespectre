@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Transient network failures (stream resets, connection resets) on a List/Create call are now retried up to 3 times with short bounded backoff before an auditor gives up, instead of silently zeroing out that auditor's entire finding set for the run. Permanent errors (RBAC Forbidden/NotFound/Unauthorized) are never retried. Applied to the secret, pod-security, and service-account (per-namespace SSAR) auditors.
+- A cascade of identical `context deadline exceeded` errors from one auditor (e.g. dozens of per-namespace timeouts on a large cluster) is now collapsed into a single summarized message ("N calls failed with context deadline exceeded (increase --timeout for a cluster this size)") instead of dozens of near-identical raw error lines.
+
+### Changed
+- Default `--timeout` raised from 5m to 10m -- empirically, a 72-namespace real-world cluster needed more than 5m to complete cleanly. See `docs/cli-reference.md` for sizing guidance on larger clusters.
+
 ## [0.6.0] - 2026-07-31
 
 ### Added
