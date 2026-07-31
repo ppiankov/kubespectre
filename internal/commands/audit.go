@@ -14,11 +14,18 @@ import (
 )
 
 // WO-18: Name shared audit defaults so registration and precedence cannot drift.
+// WO-49: defaultAuditTimeout raised from 5m -- empirically, a 72-namespace
+// real-world cluster needed 15m to complete cleanly (6m47s actual wall
+// time; 5m produced a cascade of context-deadline-exceeded errors from the
+// service-account auditor). 10m gives comfortable headroom for a
+// medium-sized cluster without defaulting to an excessively long wait on
+// small clusters; see docs/cli-reference.md for sizing guidance for larger
+// clusters.
 const (
 	defaultAuditFormat  = "text"
 	defaultSeverityMin  = "low"
 	defaultStaleDays    = 90
-	defaultAuditTimeout = 5 * time.Minute
+	defaultAuditTimeout = 10 * time.Minute
 )
 
 var auditFlags struct {

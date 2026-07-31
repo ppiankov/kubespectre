@@ -82,19 +82,23 @@ func ProveNamespaceCoverage(
 		return coverage, errors.New("namespace is required")
 	}
 
-	review, err := client.AuthorizationV1().SelfSubjectAccessReviews().Create(
-		ctx,
-		&authorizationv1.SelfSubjectAccessReview{
-			Spec: authorizationv1.SelfSubjectAccessReviewSpec{
-				ResourceAttributes: &authorizationv1.ResourceAttributes{
-					Namespace: namespace,
-					Verb:      "list",
-					Resource:  "serviceaccounts",
+	// WO-48: retry a transient network blip before treating this namespace's
+	// coverage as unproven for the whole run.
+	review, err := retryTransient(ctx, func() (*authorizationv1.SelfSubjectAccessReview, error) {
+		return client.AuthorizationV1().SelfSubjectAccessReviews().Create(
+			ctx,
+			&authorizationv1.SelfSubjectAccessReview{
+				Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+					ResourceAttributes: &authorizationv1.ResourceAttributes{
+						Namespace: namespace,
+						Verb:      "list",
+						Resource:  "serviceaccounts",
+					},
 				},
 			},
-		},
-		metav1.CreateOptions{},
-	)
+			metav1.CreateOptions{},
+		)
+	})
 	coverage.ObservedAt = time.Now().UTC()
 	if err != nil {
 		return coverage, fmt.Errorf("create serviceaccount SSAR for namespace %q: %w", namespace, err)
