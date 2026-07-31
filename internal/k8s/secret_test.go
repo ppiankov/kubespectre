@@ -2,12 +2,17 @@ package k8s
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestSecretScanner_StaleSecret(t *testing.T) {
@@ -472,5 +477,103 @@ func TestSecretScanner_ManagedUnusedSecretDownrankingDisabled(t *testing.T) {
 	}
 	if len(findings) != 1 || findings[0].Severity != SeverityHigh {
 		t.Fatalf("findings = %#v, want 1 UNUSED_SECRET_MOUNT at high (downranking disabled)", findings)
+	}
+}
+
+// WO-50: secretListPage builds a *corev1.SecretList carrying the given
+// continuation token, for reactors simulating a paginated List response.
+func secretListPage(names []string, continueToken string) *corev1.SecretList {
+	list := &corev1.SecretList{ListMeta: metav1.ListMeta{Continue: continueToken}}
+	for _, name := range names {
+		list.Items = append(list.Items, corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}})
+	}
+	return list
+}
+
+// WO-50: listSecretsPaged must accumulate every item across all pages, in a
+// cluster small enough to fit in a single page as well as one that spans
+// several.
+func TestListSecretsPaged_FetchesAllPages(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	calls := 0
+	client.PrependReactor("list", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		calls++
+		switch calls {
+		case 1:
+			return true, secretListPage([]string{"s1", "s2"}, "tok-2"), nil
+		case 2:
+			return true, secretListPage([]string{"s3", "s4"}, "tok-3"), nil
+		case 3:
+			return true, secretListPage([]string{"s5"}, ""), nil
+		default:
+			t.Fatalf("unexpected extra List call #%d", calls)
+			return false, nil, nil
+		}
+	})
+
+	result, err := listSecretsPaged(context.Background(), client, "")
+	if err != nil {
+		t.Fatalf("list secrets paged: %v", err)
+	}
+	if len(result.Items) != 5 {
+		t.Fatalf("got %d secrets, want 5 across 3 pages", len(result.Items))
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3 (one per page)", calls)
+	}
+}
+
+// WO-50: the load-bearing regression -- a transient failure on one page must
+// only retry that page, not restart the whole list from page 1. If it
+// restarted, page 1's items would be re-fetched and duplicated, and the call
+// count would exceed what one retried page requires.
+func TestListSecretsPaged_RetriesOnlyFailingPageNotWholeList(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	calls := 0
+	client.PrependReactor("list", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		calls++
+		switch calls {
+		case 1:
+			return true, secretListPage([]string{"s1", "s2"}, "tok-2"), nil
+		case 2:
+			// WO-50: page 2's first attempt fails transiently.
+			return true, nil, errors.New("stream error when reading response body; INTERNAL_ERROR; received from peer")
+		case 3:
+			return true, secretListPage([]string{"s3", "s4"}, "tok-3"), nil
+		case 4:
+			return true, secretListPage([]string{"s5"}, ""), nil
+		default:
+			t.Fatalf("unexpected extra List call #%d -- retry must not restart from page 1", calls)
+			return false, nil, nil
+		}
+	})
+
+	result, err := listSecretsPaged(context.Background(), client, "")
+	if err != nil {
+		t.Fatalf("list secrets paged: %v", err)
+	}
+	if len(result.Items) != 5 {
+		t.Fatalf("got %d secrets, want 5 (no duplication or loss across the retried page)", len(result.Items))
+	}
+	if calls != 4 {
+		t.Fatalf("calls = %d, want 4 (3 pages + 1 retry of page 2, no whole-list restart)", calls)
+	}
+}
+
+// WO-50: a permanent error on any page must still fail immediately, not retry.
+func TestListSecretsPaged_PermanentErrorNotRetried(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	calls := 0
+	client.PrependReactor("list", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		calls++
+		return true, nil, k8serrors.NewForbidden(schema.GroupResource{Resource: "secrets"}, "", errors.New("denied"))
+	})
+
+	_, err := listSecretsPaged(context.Background(), client, "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1 (non-transient error must not retry)", calls)
 	}
 }

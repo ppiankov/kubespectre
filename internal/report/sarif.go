@@ -137,7 +137,7 @@ func buildSARIFRules() []sarifRule {
 		{ID: string(k8s.FindingHostNetwork), ShortDescription: sarifMessage{Text: "Host network access"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
 		{ID: string(k8s.FindingHostPID), ShortDescription: sarifMessage{Text: "Host PID namespace access"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
 		{ID: string(k8s.FindingMissingNetworkPolicy), ShortDescription: sarifMessage{Text: "Missing network policy"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
-		{ID: string(k8s.FindingUnencryptedSecrets), ShortDescription: sarifMessage{Text: "Unencrypted secrets in etcd"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
+		// WO-51: UNENCRYPTED_SECRETS removed -- never produceable, see types.go.
 		{ID: string(k8s.FindingUnusedSecretMount), ShortDescription: sarifMessage{Text: "Unused secret mount"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
 		{ID: string(k8s.FindingStaleSecret), ShortDescription: sarifMessage{Text: "Stale secret"}, DefaultConfig: sarifDefaultLevel{Level: "error"}},
 		{ID: string(k8s.FindingDefaultServiceAccount), ShortDescription: sarifMessage{Text: "Default service account used"}, DefaultConfig: sarifDefaultLevel{Level: "warning"}},

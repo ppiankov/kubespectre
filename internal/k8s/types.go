@@ -53,6 +53,10 @@ func ParseSeverity(s string) Severity {
 }
 
 // FindingID identifies the type of security issue detected.
+// WO-51: UNENCRYPTED_SECRETS was removed -- etcd-at-rest encryption
+// configuration is a kube-apiserver static flag, never exposed as an API
+// object (especially unreachable on a managed control plane like EKS), so
+// this FindingID could never actually be produced by any auditor.
 type FindingID string
 
 const (
@@ -62,7 +66,6 @@ const (
 	FindingHostNetwork           FindingID = "HOST_NETWORK"
 	FindingHostPID               FindingID = "HOST_PID"
 	FindingMissingNetworkPolicy  FindingID = "MISSING_NETWORK_POLICY"
-	FindingUnencryptedSecrets    FindingID = "UNENCRYPTED_SECRETS"
 	FindingUnusedSecretMount     FindingID = "UNUSED_SECRET_MOUNT"
 	FindingStaleSecret           FindingID = "STALE_SECRET"
 	FindingDefaultServiceAccount FindingID = "DEFAULT_SERVICE_ACCOUNT"
@@ -96,7 +99,6 @@ var AllFindingIDs = []FindingID{
 	FindingHostNetwork,
 	FindingHostPID,
 	FindingMissingNetworkPolicy,
-	FindingUnencryptedSecrets,
 	FindingUnusedSecretMount,
 	FindingStaleSecret,
 	FindingDefaultServiceAccount,

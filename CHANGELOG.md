@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- The secret auditor's List call is now paginated (500 secrets per page) instead of one unbounded request. Empirically, 3 of 4 real clusters checked in the same session (all above ~2600 total scanned resources) failed this exact call with a transient network stream-reset error even with WO-48's retry active -- the response size correlated directly with the failure rate. Pagination means a mid-stream reset now only costs one page (retried individually), not the auditor's entire finding set for the run.
+
+### Removed
+- The `UNENCRYPTED_SECRETS` finding ID has been removed. It was declared in the finding registry and had a SARIF rule, but no auditor code ever produced it -- etcd-at-rest encryption configuration is a kube-apiserver static flag, never exposed via the Kubernetes API (especially unreachable on a managed control plane like EKS), so this check could never actually run.
+
 ## [0.6.2] - 2026-07-31
 
 ### Fixed
