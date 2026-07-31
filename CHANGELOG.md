@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0] - 2026-07-31
 
 ### Changed
 - `STALE_SECRET`'s staleness clock now uses the more recent of `creationTimestamp` and any `managedFields[].time` entry, instead of `creationTimestamp` alone -- a secret updated in place (the normal pattern for most secret-managing controllers) never gets a new `creationTimestamp`, so age-alone would misreport an actively-rotated secret as forgotten. Finding metadata now carries both `created` and `last_modified`.
