@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.3] - 2026-07-31
 
 ### Fixed
 - The secret auditor's List call is now paginated (500 secrets per page) instead of one unbounded request. Empirically, 3 of 4 real clusters checked in the same session (all above ~2600 total scanned resources) failed this exact call with a transient network stream-reset error even with WO-48's retry active -- the response size correlated directly with the failure rate. Pagination means a mid-stream reset now only costs one page (retried individually), not the auditor's entire finding set for the run.
