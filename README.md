@@ -10,6 +10,7 @@
 - Audits RBAC permissions, pod security standards, and network policies
 - Detects stale secrets, unused service accounts, and image provenance issues
 - Checks audit logging configuration and namespace isolation
+- Flags degraded/outdated nodes and stale released PersistentVolumes
 - Each finding includes severity for CI/CD gating and compliance reporting
 - Outputs text, JSON, SARIF, and SpectreHub formats
 
@@ -58,6 +59,8 @@ kubespectre audit --kubeconfig ~/.kube/config --format json
 | Command | Description |
 |---------|-------------|
 | `kubespectre audit` | Audit cluster security posture |
+| `kubespectre rbac` | Audit RBAC permissions only |
+| `kubespectre init` | Generate sample config and RBAC policy |
 | `kubespectre version` | Print version |
 
 ## SpectreHub integration
